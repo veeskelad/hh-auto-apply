@@ -424,6 +424,7 @@ class BotManager:
         try:
             set_campaign_stats(
                 cid, sent=state.campaign_sent, skipped=state.campaign_skipped,
+                skip_reasons=dict(state.campaign_skip_reasons),
                 errors=state.campaign_errors, finished_at=fin, status=status,
             )
         except Exception as e:
@@ -468,6 +469,7 @@ class BotManager:
                                and str(a.get("at", "")).startswith(today))
         state.campaign_sent = 0
         state.campaign_skipped = 0
+        state.campaign_skip_reasons = {}
         state.campaign_errors = 0
         state.paused = False
         state.hard_stopped = False
@@ -789,6 +791,7 @@ class BotManager:
                 "armed": s.armed,
                 "campaign_sent": s.campaign_sent,
                 "campaign_skipped": s.campaign_skipped,
+                "campaign_skip_reasons": dict(s.campaign_skip_reasons),
                 "campaign_errors": s.campaign_errors,
                 "active_campaign_id": s.active_campaign_id,
                 "is_temp": False,
@@ -875,6 +878,7 @@ class BotManager:
                     "armed": s.armed,
                     "campaign_sent": s.campaign_sent,
                     "campaign_skipped": s.campaign_skipped,
+                    "campaign_skip_reasons": dict(s.campaign_skip_reasons),
                     "campaign_errors": s.campaign_errors,
                     "active_campaign_id": s.active_campaign_id,
                     "is_temp": True,
@@ -1287,26 +1291,30 @@ class BotManager:
                     return not eff_salary_only
                 return sal >= eff_min_salary
 
+            def _skip(reason):
+                state.campaign_skipped += 1
+                state.campaign_skip_reasons[reason] = state.campaign_skip_reasons.get(reason, 0) + 1
+
             for vid in unique_vacancies:
                 if is_applied(acc["name"], vid):
                     already_count += 1
                     state.already_applied += 1
-                    state.campaign_skipped += 1
+                    _skip("already")
                 elif (is_test(vid) or state._test_failures.get(vid, 0) >= 2) and not apply_tests:
                     test_count += 1
                     state.tests += 1
-                    state.campaign_skipped += 1
+                    _skip("test")
                 elif not _title_allowed(vid):
                     title_skipped += 1
-                    state.campaign_skipped += 1
+                    _skip("title")
                 elif _schedule_blocked(vid):
                     schedule_skipped += 1
                     state.schedule_skipped += 1
-                    state.campaign_skipped += 1
+                    _skip("schedule")
                 elif not _salary_ok(vid):
                     salary_skipped += 1
                     state.salary_skipped += 1
-                    state.campaign_skipped += 1
+                    _skip("salary")
                 else:
                     filtered.append(vid)
 

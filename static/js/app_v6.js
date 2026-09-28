@@ -590,6 +590,13 @@ function toggleLang() {
   applyI18n();
 }
 
+function toggleTheme() {
+  const root = document.documentElement;
+  const current = root.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  root.dataset.theme = current === 'dark' ? 'light' : 'dark';
+  try { localStorage.setItem('hh-theme', root.dataset.theme); } catch (e) {}
+}
+
 // ── State ──────────────────────────────────────────────────────
 const State = {
   ws: null,
@@ -1924,6 +1931,7 @@ function connect() {
 
   ws.onopen = () => {
     document.getElementById('conn-dot').classList.add('connected');
+    setText('hdr-live-text', 'Бот на связи');
     State.reconnectDelay = 1000;
   };
 
@@ -1948,6 +1956,7 @@ function connect() {
 
   ws.onclose = () => {
     document.getElementById('conn-dot').classList.remove('connected');
+    setText('hdr-live-text', 'Нет связи с ботом, переподключаюсь');
     State.reconnectTimer = setTimeout(() => {
       State.reconnectDelay = Math.min(State.reconnectDelay * 2, 30000);
       connect();
@@ -2016,6 +2025,7 @@ function renderAll(snap) {
   renderHeader(snap);
   updateHeaderResumeStats(snap);
   syncLetterSelects(snap);
+  applyBuildAccountSelect(snap);
   syncAccUrlChecks(snap);
   syncLlmSettings(snap);
   syncScheduleSettings(snap);
@@ -2063,9 +2073,9 @@ function updatePageTitle(snap) {
   } else if (snap.paused) {
     document.title = t('title_paused');
   } else if (sent > 0) {
-    document.title = `${sent} откл. | HH Bot`;
+    document.title = `${sent} откл. | hh-auto-apply`;
   } else {
-    document.title = 'HH Bot Dashboard';
+    document.title = 'hh-auto-apply';
   }
 }
 
@@ -2095,7 +2105,7 @@ function checkNotifications(snap) {
 }
 
 function sendBotNotification(title, body) {
-  try { new Notification(title, { body, icon: '/favicon.ico' }); } catch(e) {}
+  try { new Notification(title, { body, icon: '/static/img/logo-180.png' }); } catch(e) {}
 }
 
 function fmtUptime(s) {
@@ -2113,23 +2123,16 @@ function renderHeader(snap) {
   document.getElementById('storage-total').textContent = snap.global_stats.storage_total;
   document.getElementById('storage-tests').textContent = snap.global_stats.storage_tests;
 
-  // Daily counter
+  // Отклики за сегодня: число крупно, лимит — подписью «из N»
+  const accs = snap.accounts || [];
+  const totalDaily = accs.reduce((s, a) => s + (a.daily_sent || 0), 0);
+  const limit = snap.config?.daily_apply_limit || 0;
+  // счётчик воркера обнуляется при перезапуске, история — нет: берём большее
+  setText('hdr-today', Math.max(totalDaily, typeof campTodayCount === 'function' ? campTodayCount() : 0));
   const dailyEl = document.getElementById('hdr-daily-counter');
-  if (dailyEl) {
-    const accs = snap.accounts || [];
-    const totalDaily = accs.reduce((s, a) => s + (a.daily_sent || 0), 0);
-    const limit = snap.config?.daily_apply_limit || 0;
-    const stopped = accs.some(a => a.hard_stopped);
-    if (limit > 0) {
-      dailyEl.textContent = `(${totalDaily}/${limit} сегодня)`;
-      dailyEl.style.color = totalDaily >= limit ? 'var(--red)' : 'var(--yellow)';
-    } else if (totalDaily > 0) {
-      dailyEl.textContent = `(${totalDaily} сегодня)`;
-      dailyEl.style.color = stopped ? 'var(--red)' : 'var(--yellow)';
-    } else {
-      dailyEl.textContent = '';
-    }
-  }
+  if (dailyEl) dailyEl.textContent = limit > 0 ? ` из ${limit}` : '';
+  const todayEl = document.getElementById('hdr-today');
+  if (todayEl) todayEl.classList.toggle('at-limit', (limit > 0 && totalDaily >= limit) || accs.some(a => a.hard_stopped));
 
   // Smart search filter badges
   const filterEl = document.getElementById('hdr-filters');
@@ -2161,12 +2164,12 @@ function renderHeader(snap) {
     const oauthCount = accs.filter(a => a.use_oauth).length;
     const globalOAuth = snap.config?.use_oauth_apply;
     if (oauthCount > 0 || globalOAuth) {
-      const label = globalOAuth ? 'OAuth · все' : `OAuth · ${oauthCount}/${accs.length}`;
+      const label = globalOAuth ? 'Отклики через API' : `Через API: ${oauthCount} из ${accs.length}`;
       modeBadge.textContent = label;
       modeBadge.style.background = 'rgba(63,185,80,0.15)';
       modeBadge.style.color = 'var(--primary)';
     } else {
-      modeBadge.textContent = 'Web';
+      modeBadge.textContent = 'Отклики через сайт';
       modeBadge.style.background = 'rgba(57,208,216,0.15)';
       modeBadge.style.color = 'var(--cyan)';
     }
@@ -3457,8 +3460,8 @@ function sessSetMode(mode) {
   if (panelManual) panelManual.style.display = mode === 'manual' ? '' : 'none';
   const btnCurl = document.getElementById('sess-mode-curl');
   const btnManual = document.getElementById('sess-mode-manual');
-  if (btnCurl) { btnCurl.style.background = mode === 'curl' ? 'var(--cyan)' : 'transparent'; btnCurl.style.color = mode === 'curl' ? '#000' : 'var(--dim)'; }
-  if (btnManual) { btnManual.style.background = mode === 'manual' ? 'var(--cyan)' : 'transparent'; btnManual.style.color = mode === 'manual' ? '#000' : 'var(--dim)'; }
+  if (btnCurl) { btnCurl.style.background = mode === 'curl' ? 'var(--primary)' : 'transparent'; btnCurl.style.color = mode === 'curl' ? '#fff' : 'var(--dim)'; }
+  if (btnManual) { btnManual.style.background = mode === 'manual' ? 'var(--primary)' : 'transparent'; btnManual.style.color = mode === 'manual' ? '#fff' : 'var(--dim)'; }
 }
 
 // ── Session Add ───────────────────────────────────────────────
@@ -4586,7 +4589,6 @@ function updateHeaderResumeStats(snap) {
   });
   const hdrEl = document.getElementById('hdr-resume-stats');
   if (hdrEl) {
-    hdrEl.style.display = (totalViewsNew > 0 || totalInvNew > 0 || totalShows > 0) ? '' : 'none';
     setText('hdr-views-new', totalViewsNew);
     setText('hdr-inv-new', totalInvNew);
     setText('hdr-shows', totalShows);
@@ -5359,17 +5361,22 @@ async function loadCampaigns() {
   }
 }
 
+function ruPlural(n, one, few, many) {
+  const m10 = n % 10, m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return one;
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
+  return many;
+}
+
 function renderCampaignsSummary(d) {
   const el = document.getElementById('campaigns-summary');
   if (!el) return;
-  const card = (label, val, color) =>
-    `<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:16px 18px">
-       <div style="font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--dim)">${label}</div>
-       <div style="font-size:30px;font-weight:800;margin-top:6px;${color ? 'color:' + color : ''}">${val}</div>
-     </div>`;
-  el.innerHTML = card('Всего кампаний', d.total || 0)
-    + card('Активные', d.active || 0, 'var(--primary)')
-    + card('Всего откликов', d.total_responses || 0);
+  const total = d.total || 0, active = d.active || 0, sent = d.total_responses || 0;
+  el.className = 'campaigns-summary';
+  el.removeAttribute('style');
+  el.innerHTML = `<b>${total}</b> ${ruPlural(total, 'кампания', 'кампании', 'кампаний')}, `
+    + (active ? `<b class="is-active">${active}</b> ${ruPlural(active, 'работает', 'работают', 'работают')} сейчас` : 'сейчас ни одна не запущена')
+    + `. Отправлено <b>${sent}</b> ${ruPlural(sent, 'отклик', 'отклика', 'откликов')}.`;
 }
 
 function _campStatusBadge(st) {

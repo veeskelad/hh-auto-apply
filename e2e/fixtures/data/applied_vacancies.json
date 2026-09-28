@@ -1,0 +1,136 @@
+{
+ "Тест Тестов": {
+  "900000": {
+   "at": "2026-09-28T12:04:07",
+   "campaign_id": "e2ecamp1",
+   "company": "Альфа Софт",
+   "salary_from": 180000,
+   "salary_to": null,
+   "source_query": "Python Developer",
+   "source_url": "https://hh.ru/search/vacancy?text=Python+Developer",
+   "title": "Python Developer",
+   "url": "https://hh.ru/vacancy/900000"
+  },
+  "900001": {
+   "at": "2026-09-27T12:04:07",
+   "campaign_id": "e2ecamp1",
+   "company": "Бета Лабс",
+   "salary_from": 190000,
+   "salary_to": null,
+   "source_query": "Python Developer",
+   "source_url": "https://hh.ru/search/vacancy?text=Python+Developer",
+   "title": "Backend Developer",
+   "url": "https://hh.ru/vacancy/900001"
+  },
+  "900002": {
+   "at": "2026-09-26T12:04:07",
+   "campaign_id": "e2ecamp1",
+   "company": "Гамма Тех",
+   "salary_from": 200000,
+   "salary_to": null,
+   "source_query": "Python Developer",
+   "source_url": "https://hh.ru/search/vacancy?text=Python+Developer",
+   "title": "Senior Python Engineer",
+   "url": "https://hh.ru/vacancy/900002"
+  },
+  "900003": {
+   "at": "2026-09-25T12:04:07",
+   "campaign_id": "e2ecamp1",
+   "company": "Дельта Системс",
+   "salary_from": 210000,
+   "salary_to": null,
+   "source_query": "Python Developer",
+   "source_url": "https://hh.ru/search/vacancy?text=Python+Developer",
+   "title": "Python Developer",
+   "url": "https://hh.ru/vacancy/900003"
+  },
+  "900004": {
+   "at": "2026-09-28T12:04:07",
+   "campaign_id": "e2ecamp1",
+   "company": "Эпсилон",
+   "salary_from": 220000,
+   "salary_to": null,
+   "source_query": "Python Developer",
+   "source_url": "https://hh.ru/search/vacancy?text=Python+Developer",
+   "title": "Backend Developer",
+   "url": "https://hh.ru/vacancy/900004"
+  },
+  "900005": {
+   "at": "2026-09-27T12:04:07",
+   "campaign_id": "e2ecamp1",
+   "company": "Альфа Софт",
+   "salary_from": 230000,
+   "salary_to": null,
+   "source_query": "Python Developer",
+   "source_url": "https://hh.ru/search/vacancy?text=Python+Developer",
+   "title": "Senior Python Engineer",
+   "url": "https://hh.ru/vacancy/900005"
+  },
+  "900006": {
+   "at": "2026-09-26T12:04:07",
+   "campaign_id": "e2ecamp1",
+   "company": "Бета Лабс",
+   "salary_from": 240000,
+   "salary_to": null,
+   "source_query": "Python Developer",
+   "source_url": "https://hh.ru/search/vacancy?text=Python+Developer",
+   "title": "Python Developer",
+   "url": "https://hh.ru/vacancy/900006"
+  },
+  "900007": {
+   "at": "2026-09-25T12:04:07",
+   "campaign_id": "e2ecamp1",
+   "company": "Гамма Тех",
+   "salary_from": 250000,
+   "salary_to": null,
+   "source_query": "Python Developer",
+   "source_url": "https://hh.ru/search/vacancy?text=Python+Developer",
+   "title": "Backend Developer",
+   "url": "https://hh.ru/vacancy/900007"
+  },
+  "900008": {
+   "at": "2026-09-28T12:04:07",
+   "campaign_id": "e2ecamp1",
+   "company": "Дельта Системс",
+   "salary_from": 260000,
+   "salary_to": null,
+   "source_query": "Python Developer",
+   "source_url": "https://hh.ru/search/vacancy?text=Python+Developer",
+   "title": "Senior Python Engineer",
+   "url": "https://hh.ru/vacancy/900008"
+  },
+  "900009": {
+   "at": "2026-09-27T12:04:07",
+   "campaign_id": "e2ecamp1",
+   "company": "Эпсилон",
+   "salary_from": 270000,
+   "salary_to": null,
+   "source_query": "Python Developer",
+   "source_url": "https://hh.ru/search/vacancy?text=Python+Developer",
+   "title": "Python Developer",
+   "url": "https://hh.ru/vacancy/900009"
+  },
+  "900010": {
+   "at": "2026-09-26T12:04:07",
+   "campaign_id": "e2ecamp1",
+   "company": "Альфа Софт",
+   "salary_from": 280000,
+   "salary_to": null,
+   "source_query": "Python Developer",
+   "source_url": "https://hh.ru/search/vacancy?text=Python+Developer",
+   "title": "Backend Developer",
+   "url": "https://hh.ru/vacancy/900010"
+  },
+  "900011": {
+   "at": "2026-09-25T12:04:07",
+   "campaign_id": "e2ecamp1",
+   "company": "Бета Лабс",
+   "salary_from": 290000,
+   "salary_to": null,
+   "source_query": "Python Developer",
+   "source_url": "https://hh.ru/search/vacancy?text=Python+Developer",
+   "title": "Senior Python Engineer",
+   "url": "https://hh.ru/vacancy/900011"
+  }
+ }
+}

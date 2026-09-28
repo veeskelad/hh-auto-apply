@@ -214,7 +214,7 @@ h3 { font-size: 16px; margin-bottom: 12px; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: #ffffff;
+  background: var(--bg-card);
   color: var(--text-main);
   font-weight: 500;
   font-size: 14px;
@@ -228,7 +228,7 @@ h3 { font-size: 16px; margin-bottom: 12px; }
   text-decoration: none;
   white-space: nowrap;
 }
-.btn:hover { background: #f9fafb; border-color: #9ca3af; }
+.btn:hover { background: var(--bg-card2); border-color: var(--border-strong); }
 .btn-primary { background: var(--primary); color: #fff; border-color: var(--primary); }
 .btn-primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
 .btn-sm {
@@ -240,7 +240,7 @@ h3 { font-size: 16px; margin-bottom: 12px; }
   min-height: 28px;
   border: 1px solid #d1d5db;
   border-radius: 6px;
-  background: #fff;
+  background: var(--bg-card);
   color: var(--text-main);
   font-size: 12px;
   line-height: 1.2;
@@ -248,7 +248,7 @@ h3 { font-size: 16px; margin-bottom: 12px; }
   text-decoration: none;
   white-space: nowrap;
 }
-.btn-sm:hover { background: #f9fafb; border-color: #9ca3af; }
+.btn-sm:hover { background: var(--bg-card2); border-color: var(--border-strong); }
 
 /* ── Forms ── */
 .form-group { margin-bottom: 20px; }
@@ -267,7 +267,7 @@ h3 { font-size: 16px; margin-bottom: 12px; }
 .form-input, .form-select {
   width: 100%;
   padding: 10px 12px;
-  background: #ffffff;
+  background: var(--bg-card);
   border: 1px solid #d1d5db;
   border-radius: var(--radius);
   font-family: var(--font-ui);
@@ -333,7 +333,7 @@ h3 { font-size: 16px; margin-bottom: 12px; }
 }
 .segment-btn.active,
 .segment-control .btn.active {
-  background: #fff;
+  background: var(--bg-card);
   color: var(--primary);
   font-weight: 700;
   border: 1px solid var(--primary);
@@ -392,7 +392,7 @@ h3 { font-size: 16px; margin-bottom: 12px; }
   min-width: 720px;
 }
 .data-table th {
-  background: #f9fafb;
+  background: var(--bg-card2);
   padding: 12px 16px;
   font-weight: 600;
   font-size: 12px;
@@ -406,7 +406,7 @@ h3 { font-size: 16px; margin-bottom: 12px; }
   border-bottom: 1px solid var(--border);
   font-size: 14px;
 }
-.data-table tr:hover td { background: #f9fafb; }
+.data-table tr:hover td { background: var(--bg-card2); }
 .data-table tr:last-child td { border-bottom: none; }
 
 /* ── Terminal / Logs ── */
@@ -434,7 +434,7 @@ h3 { font-size: 16px; margin-bottom: 12px; }
   border-radius: 9999px;
   font-weight: 500;
   font-size: 12px;
-  background: #f3f4f6;
+  background: var(--bg-card2);
   color: #374151;
 }
 .badge-success { background: #d1fae5; color: #065f46; }
@@ -928,7 +928,7 @@ body.auth-required #panel-auth {
   padding: 3px 7px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: #fff;
+  background: var(--bg-card);
   color: var(--text-main);
   cursor: pointer;
   line-height: 1;
@@ -1093,7 +1093,7 @@ body.auth-required #panel-auth {
   padding: 4px 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: #fff;
+  background: var(--bg-card);
   color: var(--text-main);
   font-size: 12px;
   line-height: 1.2;
@@ -1240,7 +1240,7 @@ body.auth-required #panel-auth {
   cursor: pointer;
   font-weight: 600;
   color: var(--text-main);
-  background: #fff;
+  background: var(--bg-card);
 }
 
 .q-section-body,
@@ -1337,7 +1337,7 @@ body.auth-required #panel-auth {
   flex: 0 0 28px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: #fff;
+  background: var(--bg-card);
   color: var(--red);
   cursor: pointer;
 }
@@ -1350,7 +1350,7 @@ body.auth-required #panel-auth {
   padding: 8px 10px;
   border: 1px solid #d1d5db;
   border-radius: var(--radius);
-  background: #fff;
+  background: var(--bg-card);
   color: var(--text-main);
   font: inherit;
 }
@@ -1387,7 +1387,7 @@ body.auth-required #panel-auth {
   left: 2px;
   top: 2px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--bg-card);
   box-shadow: var(--shadow-sm);
   transition: transform 0.16s ease;
 }

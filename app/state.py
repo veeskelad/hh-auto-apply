@@ -131,6 +131,7 @@ class AccountState:
         self.armed = False          # True → кампания подтверждена, можно слать отклики
         self.campaign_sent = 0      # сколько отправлено в рамках текущего запуска (для total_limit)
         self.campaign_skipped = 0   # пропущено в рамках запуска (фильтры/дубли) — для статистики кампании
+        self.campaign_skip_reasons = {}  # причина → сколько вакансий пропущено за запуск
         self.campaign_errors = 0    # ошибок в рамках запуска — для статистики кампании
         self.active_campaign_id = None  # id запущенной кампании из библиотеки (для атрибуции)
         self._needs_applied_sync = False  # True → при следующем сборе подтянуть уже-отклинутые с HH

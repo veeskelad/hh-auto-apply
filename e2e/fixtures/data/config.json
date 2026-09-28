@@ -1,0 +1,16 @@
+{
+ "llm_enabled": false,
+ "llm_auto_send": false,
+ "use_oauth_apply": true,
+ "stop_on_hh_limit": true,
+ "llm_profiles": [
+  {
+   "name": "OpenRouter",
+   "base_url": "https://openrouter.ai/api/v1",
+   "model": "google/gemini-3-flash-preview",
+   "api_key": "env:OPENROUTER_API_KEY",
+   "enabled": false
+  }
+ ],
+ "llm_profile_mode": "fallback"
+}

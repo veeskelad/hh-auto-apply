@@ -41,6 +41,7 @@ def _merge_live(camp: dict, sent_by_cid: dict) -> dict:
         camp["status"] = "running"
         stats["skipped"] = st.campaign_skipped
         stats["errors"] = st.campaign_errors
+        stats["skip_reasons"] = dict(st.campaign_skip_reasons)
     camp["stats"] = stats
     return camp
 

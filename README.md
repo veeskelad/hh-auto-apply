@@ -6,6 +6,13 @@
 
 Форк [hh.ru-clicker](https://github.com/Vlad9572324/hh.ru-clicker).
 
+| Кампании и отклики по дням | Страница кампании |
+|---|---|
+| ![Кампании, светлая тема](images/dashboard-light.png) | ![Страница кампании: статистика и причины пропусков](images/campaign.png) |
+| ![Кампании, тёмная тема](images/dashboard-dark.png) | ![Первый запуск: подключение аккаунта](images/onboarding.png) |
+
+Скриншоты сняты e2e-тестами на выдуманных данных.
+
 ## Для агента, который разворачивает
 
 Шаги 3 и 5 требуют человека, остальное агент делает сам.
@@ -169,8 +176,8 @@ s pages_per_url 40
 s max_concurrent 20
 s response_delay 1
 s batch_responses 3
-s llm_enabled true          # черновики ответов работодателям в чатах
-s llm_auto_send false       # ответы не уходят сами, ждут подтверждения в дашборде
+# нейросеть в чатах: черновики ответов работодателям, без автоотправки (отдельный эндпоинт)
+curl -s -X POST http://127.0.0.1:8000/api/llm_config -H 'Content-Type: application/json' -d '{"enabled": true, "auto_send": false}'
 ```
 
 На Windows (PowerShell):
@@ -178,7 +185,8 @@ s llm_auto_send false       # ответы не уходят сами, ждут 
 ```powershell
 function s($k, $v) { Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/api/settings -ContentType 'application/json' -Body (@{key=$k; value=$v} | ConvertTo-Json) }
 s use_oauth_apply $true; s stop_on_hh_limit $true; s pages_per_url 40; s max_concurrent 20
-s response_delay 1; s batch_responses 3; s llm_enabled $true; s llm_auto_send $false
+s response_delay 1; s batch_responses 3
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/api/llm_config -ContentType 'application/json' -Body '{"enabled": true, "auto_send": false}'
 ```
 
 ### Кампания (параметры даёт человек)
@@ -255,6 +263,18 @@ run.bat backend       # Windows
 | `Дашборд не запустился` | порт 8000 занят или ошибка импорта, смотреть `data/server.log` |
 | Windows: `claude` или `codex` не найден | CLI не в `PATH` той консоли, где запущен `run.bat`; открыть новую консоль после установки |
 
+## Тесты
+
+Тесты поднимают отдельную копию дашборда на портах 8010–8011 с выдуманными данными из `e2e/fixtures/data/`. Наружу копия не ходит: запросы к hh.ru и вызовы `claude` / `codex` блокируются (`e2e/offline/sitecustomize.py`), так что реальный отклик из теста уйти не может. Ваши `data/` и `.env` не трогаются.
+
+```bash
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest e2e          # API и WebSocket: кампании, настройки, профили нейросети, история
+.venv/bin/python e2e/run_ui.py          # интерфейс в браузере ego lite, скриншоты в e2e/screenshots/
+```
+
+UI-тесты гоняются в [ego lite](https://lite.ego.app/) (CLI `ego-browser`): вкладки, создание кампании через форму, график откликов, страница кампании, тёмная тема, мобильная ширина, ошибки JS, экран первого запуска. На время прогона окно ego lite выходит на передний план: перекрытое окно браузер не отрисовывает, и клики в нём зависают. `python e2e/stand.py` поднимает ту же копию для ручной проверки.
+
 ## Устройство
 
 ```
@@ -269,7 +289,8 @@ app/
   llm.py              профили нейросети: claude -p, codex exec, OpenAI-совместимые API
   hh_chat.py          переписка с работодателями
   routes/             HTTP API дашборда
-static/               фронтенд дашборда
+static/               фронтенд дашборда: theme.css — оформление, campaigns.js — кампании, график, страница кампании
+e2e/                  тесты: изолированный стенд, фикстуры, API и UI
 data/                 всё пользовательское, не в git
 ```
 

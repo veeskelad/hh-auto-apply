@@ -38,3 +38,7 @@ ssl/
 .playwright-mcp/
 .superpowers/
 execution/logs/
+
+# Фикстуры e2e — выдуманные данные, их место в git
+!/e2e/fixtures/data/
+/e2e/screenshots/

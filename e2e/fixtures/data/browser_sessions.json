@@ -1,0 +1,52 @@
+[
+ {
+  "name": "Тест Тестов",
+  "short": "Тест",
+  "color": "#3b5bdb",
+  "resume_hash": "e2e0000000000000000000000000000000000a",
+  "all_resumes": [
+   {
+    "hash": "e2e0000000000000000000000000000000000a",
+    "title": "Python-разработчик"
+   },
+   {
+    "hash": "e2e0000000000000000000000000000000000b",
+    "title": "Backend-разработчик"
+   }
+  ],
+  "letter": "Здравствуйте! Интересна ваша вакансия.",
+  "cookies": {
+   "hhuid": "e2e-hhuid",
+   "hhtoken": "e2e-fake-token",
+   "_xsrf": "e2e-xsrf",
+   "crypted_id": "e2e"
+  },
+  "urls": [],
+  "strict_title_match": true,
+  "search_query": "Python Developer",
+  "resume_hash_2": "",
+  "region": "",
+  "remote_only": true,
+  "salary_from": 200000,
+  "experience": "between1And3",
+  "daily_limit": 30,
+  "daily_limit_max": 50,
+  "total_limit": 100,
+  "industry": "",
+  "schedule": "any",
+  "employment": "any",
+  "stop_words": "стажёр, intern",
+  "limit_24_7": false,
+  "salary_only": false,
+  "accredited_it": false,
+  "ai_cover_letter": false,
+  "ai_answers": false,
+  "gender": "none",
+  "phone": "",
+  "tg": "@username",
+  "response_delay": 1,
+  "skip_inconsistent": false,
+  "bot_active": false,
+  "paused": true
+ }
+]
