@@ -38,7 +38,7 @@ def _validate_and_profile(raw_cookie_line: str) -> dict:
             allow_redirects=True,
         )
     except Exception as e:
-        return {"ok": False, "error": f"Ошибка сети: {e}"}
+        return {"ok": False, "error": f"Не удалось связаться с hh.ru, проверьте интернет или VPN: {e}"}
 
     if r.status_code != 200:
         hint = " — возможно, сессия устарела или нужно войти заново" if r.status_code in (401, 403) else ""
@@ -148,9 +148,11 @@ async def api_session_add(body: dict):
     cookies, raw_cookie_line = _parse_cookies_str(cookie_str)
 
     if not cookies or not raw_cookie_line:
-        return {"status": "error", "message": "Не удалось распознать cookies — вставьте cURL целиком или строку Cookie: ..."}
+        if "fetch(" in cookie_str:
+            return {"status": "error", "message": "В «Копировать как fetch» браузер не кладёт куки. Скопируйте тот же запрос как cURL (bash или cmd)"}
+        return {"status": "error", "message": "Не удалось найти куки. Скопируйте любой запрос к hh.ru как cURL (bash или cmd) и вставьте целиком"}
     if "hhtoken" not in cookies:
-        return {"status": "error", "message": "Не найден hhtoken — вставьте полный cURL (правая кнопка на запросе → Copy as cURL)"}
+        return {"status": "error", "message": "В этом запросе нет куки hhtoken: он ушёл не на hh.ru (картинка, скрипт с другого домена) или вы не вошли в аккаунт. Возьмите запрос, у которого адрес начинается с https://hh.ru/"}
     if "_xsrf" not in cookies:
         return {"status": "error", "message": "Не найден _xsrf"}
 

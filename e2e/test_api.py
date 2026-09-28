@@ -80,3 +80,14 @@ def test_empty_stand_requires_connection(empty_api):
     snap = empty_api.snapshot()
     assert not snap.get("accounts")
     assert empty_api.get("/api/campaigns")["campaigns"] == []
+
+
+def test_session_add_explains_errors(api):
+    # куки из cmd-формата Windows распознаются: дальше стенд не пускает в сеть, но это уже не ошибка разбора
+    cmd = 'curl ^"https://hh.ru/x^" -b ^"hhtoken=A; _xsrf=B^"'
+    r = api.post("/api/session/add", {"cookies": cmd})
+    assert r["status"] == "error" and "Не удалось найти куки" not in r["message"], r
+    r = api.post("/api/session/add", {"cookies": 'fetch("https://hh.ru/x", {"credentials": "include"});'})
+    assert "fetch" in r["message"], r
+    r = api.post("/api/session/add", {"cookies": "curl 'https://i.hh.ru/x.js' -b '_xsrf=B; other=1'"})
+    assert "hhtoken" in r["message"], r

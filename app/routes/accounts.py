@@ -59,6 +59,27 @@ def _parse_cookies_str(raw: str) -> tuple:
 
     raw = raw.encode().decode('unicode_escape', errors='replace') if '\\u00' in raw else raw
 
+    # «Копировать как cURL (cmd)» в Chrome и Яндекс Браузере на Windows: кавычки и
+    # спецсимволы экранированы ^, строки продолжаются через ^ в конце
+    if raw.startswith("curl") and '^"' in raw:
+        raw = re.sub(r"\^\r?\n", " ", raw)
+        raw = re.sub(r"\^(.)", r"\1", raw)
+    if raw.startswith("curl.exe "):
+        raw = "curl " + raw[len("curl.exe "):]
+
+    # «Копировать как PowerShell»: каждая кука отдельным System.Net.Cookie("имя", "значение", ...)
+    ps = re.findall(r'System\.Net\.Cookie\(\s*"([^"]+)"\s*,\s*"([^"]*)"', raw)
+    if ps:
+        raw_line = "; ".join(f"{k}={v}" for k, v in ps)
+        return dict(ps), raw_line
+
+    # «Копировать как fetch (Node.js)»: заголовок cookie внутри объекта headers
+    m = re.search(r'"cookie"\s*:\s*"([^"]+)"', raw, re.IGNORECASE)
+    if raw.lstrip().startswith(("fetch(", "await fetch(")):
+        if not m:
+            return {}, ""
+        raw = "cookie: " + m.group(1)
+
     if raw.startswith("curl "):
         m = re.search(r"-H\s+['\"](?:C|c)ookie:\s*([^'\"]+)['\"]", raw, re.DOTALL)
         if not m:

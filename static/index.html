@@ -119,7 +119,7 @@ if (localStorage.getItem('hh-auth-complete') === '1') {
       <ol class="auth-steps">
         <li>Откройте hh.ru и войдите в аккаунт.</li>
         <li>F12 → Network, обновите страницу.</li>
-        <li>Правая кнопка на любом запросе к hh.ru → Copy → Copy as cURL.</li>
+        <li>Правая кнопка на любом запросе к hh.ru → Копировать → как cURL (bash или cmd, подойдут оба).</li>
       </ol>
     </div>
   </div>
@@ -1502,7 +1502,7 @@ async function hhCookieConnect() {
       }
       setTimeout(() => { location.reload(); }, 2000);
     } else {
-      status.textContent = '' + (data.error || 'Не удалось подключить');
+      status.textContent = data.message || data.error || 'Не удалось подключить';
       status.style.color = 'var(--red)';
     }
   } catch(e) {
@@ -1607,7 +1607,7 @@ async function authHhCookieConnect() {
       status.style.color = 'var(--green)';
       setTimeout(() => { location.reload(); }, 2000);
     } else {
-      status.textContent = '' + (data.error || 'Не удалось подключить');
+      status.textContent = data.message || data.error || 'Не удалось подключить';
       status.style.color = 'var(--red)';
     }
   } catch(e) {
