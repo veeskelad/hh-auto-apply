@@ -1,0 +1,18 @@
+fastapi>=0.100.0
+uvicorn[standard]>=0.20.0
+requests>=2.28.0
+websockets>=10.0
+python-multipart>=0.0.6
+itsdangerous>=2.0.0
+httpx>=0.24.0
+openai>=1.0.0
+aiohttp
+beautifulsoup4
+glom
+rich
+textual
+tabulate
+
+python-multipart>=0.0.6  # загрузка файлов в FastAPI
+pypdf>=4.0  # парсинг PDF-резюме для LLM-контекста
+curl_cffi>=0.7.0,<1.0.0

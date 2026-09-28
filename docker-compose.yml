@@ -1,0 +1,29 @@
+services:
+  hh-bot:
+    build: .
+    expose:
+      - "8000"
+    environment:
+      # Пароль на дашборд (пусто = авторизация выключена). Задаётся в .env
+      - DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD:-}
+      # Секрет подписи сессии (стабильный между рестартами). Задаётся в .env
+      - SESSION_SECRET=${SESSION_SECRET:-}
+    volumes:
+      - ./data:/app/data
+      - ./web_app.py:/app/web_app.py
+      - ./app:/app/app
+      - ./static:/app/static
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "0.0.0.0:8000:8000"
+      - "0.0.0.0:8443:8443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl/hh.crt:/ssl/hh.crt:ro
+      - ./ssl/hh.key:/ssl/hh.key:ro
+    depends_on:
+      - hh-bot
+    restart: unless-stopped

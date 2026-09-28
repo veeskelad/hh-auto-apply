@@ -1,0 +1,1648 @@
+<!DOCTYPE html>
+<html lang="ru" id="html-root">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HH Bot Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/style.css?v=15">
+
+
+<script>
+if (localStorage.getItem('hh-version-cache') !== '44') {
+  localStorage.setItem('hh-version-cache', '44');
+  window.location.reload(true);
+}
+</script>
+
+</head>
+<body class="auth-required">
+<script>
+if (localStorage.getItem('hh-auth-complete') === '1') {
+  document.body.classList.remove('auth-required');
+  document.body.classList.add('dashboard-authenticated');
+}
+</script>
+<div id="toast-container"></div>
+<div class="modal-backdrop" id="modal-backdrop" onclick="closeModal()"></div>
+
+
+<div class="dashboard-wrapper">
+  
+  <aside class="dashboard-sidebar">
+    <div class="sidebar-logo">
+      <span class="logo-mark">hh</span>
+      <span class="logo-text">bot<span class="logo-dot">.</span></span>
+    </div>
+    <nav class="sidebar-nav" id="tabs">
+
+      <div class="tab active" data-tab="apply" data-i18n="tab_apply">Кампании</div>
+      <div class="tab" data-tab="llm" data-i18n="tab_llm">Чаты</div>
+      <div class="tab" data-tab="history" data-i18n="tab_history">История</div>
+      <div class="tab" data-tab="settings" data-i18n="tab_settings">Настройки</div>
+      <div class="tab" data-tab="log" data-i18n="tab_log">Диагностика</div>
+
+</nav>
+  </aside>
+
+  <main class="dashboard-main">
+    <header class="dashboard-header" id="header">
+
+      <div style="display: flex; align-items: center; gap: 16px; margin-left: 20px;">
+        <div id="conn-dot" title="WebSocket connection" style="width: 8px; height: 8px; border-radius: 50%; background: var(--green);"></div>
+        <div class="hdr-stats" style="color:var(--text-dim);font-size:12px;display:flex;gap:16px;">
+          <span><b id="global-found">0</b> найдено</span>
+          <span><b id="global-sent">0</b> откликов <span id="hdr-daily-counter" style="color:var(--yellow)"></span></span>
+          <span id="hdr-filters" style="display:none;"></span>
+          <span><b id="storage-total">0</b> в базе</span>
+          <span><b id="storage-tests">0</b> тестов</span>
+        </div>
+        <div id="hdr-resume-stats" class="hdr-stats" style="color:var(--text-dim);font-size:12px;display:none;gap:16px;">
+          <span><b id="hdr-views-new" class="c-cyan">0</b> просм.</span>
+          <span><b id="hdr-inv-new" class="c-green">0</b> приглаш.</span>
+          <span><b id="hdr-shows" style="color:var(--dim)">0</b> показов</span>
+        </div>
+      </div>
+
+
+      
+      <div id="uptime" style="margin-left: auto; font-weight:500; font-size:12px; color:var(--text-dim);" title="Аптайм сессии бота">00:00</div>
+      <div id="dbg-err" style="display:none;color:var(--danger);font-size:11px;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
+      
+      <div class="header-actions">
+        <div id="auth-status-badge" class="topbar-status" style="display:none;cursor:pointer" title="Нажмите, чтобы войти или переподключить HH-аккаунт" onclick="showLoginModal()">Подключен · сменить</div>
+        <button id="lang-btn" class="btn" onclick="toggleLang()" title="Сменить язык">RU</button>
+        <button id="pause-btn" class="btn" onclick="sendCmd({type:'pause_toggle'})" title="Запустить или остановить бота">Пауза</button>
+        <span id="apply-mode-badge" style="padding:3px 8px;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer" onclick="sendCmd({type:'set_config',key:'use_oauth_apply',value:!State.lastSnapshot?.config?.use_oauth_apply})" title="Клик — переключить метод откликов"></span>
+        <button id="hh-login-btn" class="btn primary" onclick="showLoginModal()" title="Авторизоваться в HH.ru">Войти в HH</button>
+      </div>
+
+
+</header>
+    
+    <div class="dashboard-content">
+
+
+<!-- Main Tab (контент перенесён в «Кампании») -->
+<div id="panel-main" class="panel"></div>
+
+
+
+
+<!-- Log Tab -->
+<div id="panel-log" class="panel" style="padding:0">
+  <div id="log-filters" class="filters-bar">
+    <input id="log-search" class="form-input" type="text" placeholder="Поиск..." data-i18n-ph="log_search_ph" style="width:200px;font-size:11px;padding:3px 8px" oninput="renderLog(State.lastSnapshot)">
+    <select id="log-acc-filter" class="form-input" style="font-size:11px;padding:3px 6px" onchange="renderLog(State.lastSnapshot)">
+      <option value="" data-i18n="log_all_accs">Все аккаунты</option>
+    </select>
+    <button class="btn" data-level="" onclick="logSetLevel(this,'')" data-i18n="log_all">Все</button>
+    <button class="btn"   data-level="success" onclick="logSetLevel(this,'success')">Успех</button>
+    <button class="btn" data-level="warning" onclick="logSetLevel(this,'warning')">Предупр.</button>
+    <button class="btn"  data-level="error"   onclick="logSetLevel(this,'error')">Ошибки</button>
+    <button class="btn"      data-level="info"    onclick="logSetLevel(this,'info')">Инфо</button>
+    <span id="log-count" style="font-size:11px;color:var(--dim);margin-left:auto"></span>
+  </div>
+  <div id="log-panel" style="padding:16px">
+    <div id="log-list"></div>
+  </div>
+</div>
+
+<!-- History Tab -->
+<div id="panel-history" class="panel">
+  <div class="history-tabs-bar">
+    <div class="history-tab active" data-subtab="applied" onclick="switchHistoryTab('applied')">Отклики</div>
+    <div class="history-tab" data-subtab="tests" onclick="switchHistoryTab('tests')">Тесты</div>
+    <div class="history-tab" data-subtab="db" onclick="switchHistoryTab('db')">База вакансий</div>
+    <div class="history-tab" data-subtab="hh" onclick="switchHistoryTab('hh')">HH Статус</div>
+    <div class="history-tab" data-subtab="views" onclick="switchHistoryTab('views')">Аналитика</div>
+  </div>
+
+  <div id="panel-applied" class="history-subpanel">
+
+  <div class="apply-form" style="margin-bottom: 40px; padding: 24px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm);">
+    <div style="font-size:15px;font-weight:700;margin-bottom:6px" data-i18n="apply_title">Ручной отклик</div>
+    <div class="text-md text-dim" style="margin-bottom:20px" data-i18n="apply_desc">Введите ссылку или ID вакансии — бот проверит, нужен ли опрос, покажет вопросы и отправит отклик.</div>
+
+    <div class="apply-row" style="margin-bottom:16px">
+      <div class="apply-label" style="font-weight:500;margin-bottom:6px" data-i18n="apply_label_acc">Аккаунт</div>
+      <select id="apply-account" class="form-input" onchange="applyFillLetter(this.value)"></select>
+    </div>
+
+    <div class="apply-row" style="margin-bottom:16px">
+      <div class="apply-label" style="font-weight:500;margin-bottom:6px" data-i18n="apply_label_vacancy">Ссылка на вакансию или ID</div>
+      <input id="apply-vacancy" class="form-input" type="text"
+        placeholder="https://hh.ru/vacancy/130334718 или просто 130334718" data-i18n-ph="apply_vacancy_ph">
+    </div>
+
+    <div class="apply-row" style="margin-bottom:16px">
+      <div class="apply-label" style="font-weight:500;margin-bottom:6px" data-i18n="apply_label_tpl">Шаблон письма</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <select id="apply-letter-tpl" class="form-input" style="flex:1"
+          onchange="applyPickTemplate(this.value)">
+          <option value="" data-i18n="apply_tpl_ph">— выбрать шаблон —</option>
+        </select>
+        <button class="btn" onclick="document.getElementById('apply-letter').value=''"
+          style="white-space:nowrap;padding:6px 10px" data-i18n="apply_btn_clear">Очистить</button>
+      </div>
+    </div>
+    <div class="apply-row" style="margin-bottom:20px">
+      <div class="apply-label" style="font-weight:500;margin-bottom:6px" data-i18n="apply_label_letter">Сопроводительное письмо</div>
+      <textarea id="apply-letter" class="form-input" rows="5"
+        placeholder="Сопроводительное письмо (необязательно)" data-i18n-ph="apply_letter_ph"></textarea>
+    </div>
+
+    <div style="margin-bottom:16px">
+      <button class="btn" onclick="applyCheck()" style="background:var(--primary);color:#fff;border-color:var(--primary)" data-i18n="apply_btn_check">Проверить / Откликнуться</button>
+    </div>
+
+    <div id="apply-result" style="display:none"></div>
+    <div id="apply-questionnaire" style="display:none"></div>
+  </div>
+
+  <div class="applied-header">
+    <div style="font-size:14px;font-weight:700"><span data-i18n="applied_title">Отклики</span> <span id="applied-count" class="c-green"></span></div>
+    <div style="display:flex;gap:6px">
+      <button class="btn" onclick="exportAppliedCSV()">Экспорт CSV</button>
+      <button class="btn" onclick="loadApplied(true)">Обновить</button>
+    </div>
+  </div>
+  <div class="filters-bar">
+    <input id="applied-search" class="form-input" type="text" placeholder="Поиск по названию / компании..."
+      data-i18n-ph="applied_search_ph" style="flex:1;min-width:160px" oninput="appliedRender()">
+    <button id="applied-adv-toggle" class="btn" onclick="appliedToggleAdv()">Фильтры<span id="applied-filter-count" class="filter-count" style="display:none">0</span></button>
+    <button id="applied-reset" class="btn btn-ghost" onclick="appliedResetFilters()" style="display:none">Сброс</button>
+  </div>
+
+  <!-- Чипы критериев (по каким запросам откликались) -->
+  <div id="applied-source-chips" class="chip-row"></div>
+
+  <!-- Расширенные фильтры (сворачиваемые) -->
+  <div id="applied-adv" class="adv-filters" style="display:none">
+    <div class="adv-group">
+      <label class="adv-label">Период</label>
+      <select id="applied-period" class="form-input" onchange="appliedOnPeriodChange()">
+        <option value="">Всё время</option>
+        <option value="1">Сегодня</option>
+        <option value="7">7 дней</option>
+        <option value="30">30 дней</option>
+        <option value="custom">Свой диапазон…</option>
+      </select>
+      <div id="applied-date-custom" style="display:none;gap:6px;margin-top:6px">
+        <input id="applied-date-from" type="date" class="form-input" onchange="appliedRender()">
+        <input id="applied-date-to" type="date" class="form-input" onchange="appliedRender()">
+      </div>
+    </div>
+    <div class="adv-group">
+      <label class="adv-label">Зарплата, ₽</label>
+      <div style="display:flex;gap:6px;align-items:center">
+        <input id="applied-sal-min" type="number" min="0" step="10000" placeholder="от" class="form-input" style="width:90px" oninput="appliedRender()">
+        <span class="c-dim">—</span>
+        <input id="applied-sal-max" type="number" min="0" step="10000" placeholder="до" class="form-input" style="width:90px" oninput="appliedRender()">
+      </div>
+      <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--dim);cursor:pointer;margin-top:6px">
+        <input type="checkbox" id="applied-sal-only" onchange="appliedRender()" style="accent-color:var(--primary)">
+        Только с указанной зарплатой
+      </label>
+    </div>
+    <div class="adv-group">
+      <label class="adv-label">Аккаунт</label>
+      <select id="applied-acc-filter" class="form-input" onchange="appliedRender()">
+        <option value="" data-i18n="applied_all_accs">Все аккаунты</option>
+      </select>
+      <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--dim);cursor:pointer;margin-top:6px">
+        <input type="checkbox" id="applied-hide-empty" onchange="appliedRender()" style="accent-color:var(--primary)">
+        <span data-i18n="applied_only_named">Только с названием</span>
+      </label>
+    </div>
+  </div>
+  <div id="applied-panel">
+    <table class="data-table">
+      <thead><tr>
+        <th class="sort-th" onclick="appliedSort('at')" data-i18n="col_date">Дата<span class="sort-arrow">↕</span></th>
+        <th class="sort-th" onclick="appliedSort('account')" data-i18n="col_account">Аккаунт<span class="sort-arrow">↕</span></th>
+        <th class="sort-th" onclick="appliedSort('title')" data-i18n="col_vacancy">Вакансия<span class="sort-arrow">↕</span></th>
+        <th class="sort-th" onclick="appliedSort('company')" data-i18n="col_company">Компания<span class="sort-arrow">↕</span></th>
+        <th class="sort-th" onclick="appliedSort('source_query')">Критерий<span class="sort-arrow">↕</span></th>
+        <th class="sort-th" onclick="appliedSort('salary_from')" data-i18n="col_salary">Зарплата<span class="sort-arrow">↕</span></th>
+      </tr></thead>
+      <tbody id="applied-tbody"></tbody>
+    </table>
+    <div id="applied-cards" class="applied-cards"></div>
+    <div id="applied-loadmore" style="display:none;text-align:center;padding:12px">
+      <button class="btn" onclick="appliedShowMore()" data-i18n="btn_show_more">Показать ещё</button>
+      <span id="applied-shown" class="c-dim" style="font-size:11px;margin-left:8px"></span>
+    </div>
+  </div>
+</div>
+
+  <div id="panel-tests" class="history-subpanel">
+  <div class="applied-header">
+    <div style="font-size:14px;font-weight:700"><span data-i18n="tests_title">Вакансии с тестами</span><span id="tests-count" class="c-magenta"></span></div>
+    <button class="btn" onclick="loadTests()">Обновить</button>
+  </div>
+  <div id="tests-panel">
+    <table class="data-table">
+      <thead><tr>
+        <th data-i18n="col_date">Дата</th>
+        <th data-i18n="col_vacancy">Вакансия</th>
+        <th data-i18n="col_company">Компания</th>
+        <th data-i18n="col_account">Аккаунт</th>
+        <th data-i18n="col_applied_yn">Откликнулись</th>
+        <th data-i18n="col_link">Ссылка</th>
+      </tr></thead>
+      <tbody id="tests-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+  <div id="panel-db" class="history-subpanel">
+  <div class="applied-header">
+    <div style="font-size:14px;font-weight:700"><span data-i18n="db_title">База вакансий</span> <span id="db-count" class="c-dim"></span></div>
+    <div style="display:flex;gap:6px">
+      <button class="btn" onclick="exportDbCSV()">Экспорт CSV</button>
+      <button class="btn" onclick="loadDB(true)">Обновить</button>
+    </div>
+  </div>
+  <div class="filters-bar">
+    <input id="db-search" class="form-input" type="text" placeholder="Название / компания / ID..."
+      data-i18n-ph="db_search_ph" style="flex:1;min-width:180px" oninput="dbRender()">
+    <select id="db-status-filter" class="form-input" style="min-width:160px" onchange="dbRender()">
+      <option value="" data-i18n="db_all_statuses">Все статусы</option>
+      <option value="sent" data-i18n="db_status_sent">Откликнулись</option>
+      <option value="test_passed" data-i18n="db_status_test_passed">Тест пройден</option>
+      <option value="test_pending" data-i18n="db_status_test_pending">Тест не пройден</option>
+    </select>
+    <select id="db-acc-filter" class="form-input" style="min-width:140px" onchange="dbRender()">
+      <option value="" data-i18n="db_all_accs">Все аккаунты</option>
+    </select>
+  </div>
+  <div id="db-panel" style="max-height:calc(100vh - 220px);overflow-y:auto">
+    <table class="data-table">
+      <thead><tr>
+        <th class="sort-th" onclick="dbSort('status')" data-i18n="col_status">Статус<span class="sort-arrow">↕</span></th>
+        <th class="sort-th" onclick="dbSort('at')" data-i18n="col_date">Дата<span class="sort-arrow">↕</span></th>
+        <th class="sort-th" onclick="dbSort('title')" data-i18n="col_vacancy">Вакансия<span class="sort-arrow">↕</span></th>
+        <th class="sort-th" onclick="dbSort('company')" data-i18n="col_company">Компания<span class="sort-arrow">↕</span></th>
+        <th data-i18n="col_accounts">Аккаунты</th>
+        <th style="width:36px"></th>
+      </tr></thead>
+      <tbody id="db-tbody"></tbody>
+    </table>
+    <div id="db-loadmore" style="display:none;text-align:center;padding:12px">
+      <button class="btn" onclick="dbShowMore()" data-i18n="btn_show_more">Показать ещё</button>
+      <span id="db-shown" class="c-dim" style="font-size:11px;margin-left:8px"></span>
+    </div>
+  </div>
+</div>
+
+  <div id="panel-hh" class="history-subpanel">
+  <div id="hh-panel">
+    <div id="hh-content"></div>
+  </div>
+</div>
+
+  <div id="panel-views" class="history-subpanel">
+  <!-- Resume Audit -->
+  <div style="margin-bottom:20px">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+      <div style="font-size:15px;font-weight:700;color:var(--cyan)">Аудит резюме</div>
+      <select id="audit-acc-sel" class="form-input" style="font-size:11px;padding:3px 8px"></select>
+      <button class="btn" onclick="runResumeAudit(this)">Проверить</button>
+      <span id="audit-status" class="text-sm text-dim"></span>
+    </div>
+    <div style="margin-bottom:12px">
+      <input id="audit-extra-terms" class="form-input" type="text" style="font-size:11px;width:100%;max-width:600px"
+        placeholder="Доп. запросы для сравнения конкуренции (через запятую): devops, python developer, SRE">
+    </div>
+    <div id="audit-result" style="display:none"></div>
+    <!-- Hot leads -->
+    <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+        <div style="font-size:14px;font-weight:700;color:var(--yellow)">Горячие лиды</div>
+        <button class="btn" onclick="loadHotLeads(this)">Загрузить</button>
+        <span id="leads-status" class="text-sm text-dim"></span>
+      </div>
+      <div id="leads-result" style="display:none"></div>
+    </div>
+    <!-- HR Contacts -->
+    <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+        <div style="font-size:14px;font-weight:700;color:var(--cyan)">Контакты HR</div>
+        <button class="btn" onclick="loadHrContacts(this)">Загрузить</button>
+        <span id="contacts-status" class="text-sm text-dim"></span>
+      </div>
+      <div id="contacts-result" style="display:none"></div>
+    </div>
+    <!-- Remindable negotiations -->
+    <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+        <div style="font-size:14px;font-weight:700;color:var(--magenta)">Можно напомнить</div>
+        <button class="btn" onclick="loadRemindable(this)">Проверить</button>
+        <span id="remindable-status" class="text-sm text-dim"></span>
+      </div>
+      <div id="remindable-result" style="display:none"></div>
+    </div>
+    <!-- OAuth API -->
+    <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap">
+        <div style="font-size:14px;font-weight:700;color:var(--green)">OAuth API</div>
+        <button class="btn" onclick="oauthGetToken(this)">Получить токен</button>
+        <button class="btn" style="color:var(--cyan);border-color:var(--cyan)" onclick="oauthTouch(this)">Поднять резюме</button>
+        <span id="oauth-status" class="text-sm text-dim"></span>
+      </div>
+    </div>
+    <!-- Resume cloning -->
+    <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+        <div style="font-size:14px;font-weight:700;color:var(--magenta)">Резюме аккаунта</div>
+        <button class="btn" onclick="loadAllResumes(this)">Загрузить</button>
+        <span id="resumes-status" class="text-sm text-dim"></span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+        <select id="clone-preset" class="form-input" style="font-size:11px;padding:3px 8px">
+          <option value="">— Выбери нишу —</option>
+          <option value="Автоматизация тестирования">Автоматизация тестирования (конкуренция 15.9)</option>
+          <option value="Python Developer">Python Developer (конкуренция 10.3)</option>
+          <option value="QA Engineer">QA Engineer (конкуренция 26.8)</option>
+          <option value="Системный администратор">Системный администратор (конкуренция 20.0)</option>
+          <option value="Аналитик">Аналитик (конкуренция 2.3)</option>
+          <option value="DevOps инженер">DevOps инженер (конкуренция 23.9)</option>
+        </select>
+        <input id="clone-title" class="form-input" type="text" style="font-size:11px;flex:1;max-width:250px" placeholder="или свой заголовок...">
+        <button class="btn" style="color:var(--green);border-color:var(--green)" onclick="cloneResume(this)">Клонировать</button>
+      </div>
+      <div id="resumes-result" style="display:none"></div>
+    </div>
+  </div>
+  <div id="views-panel">
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:20px" id="views-stats-row"></div>
+    <div id="views-accounts"></div>
+  </div>
+</div>
+</div>
+
+<!-- Apply Tab (= главный экран: кампании + отклики) -->
+<div id="panel-apply" class="panel active">
+
+  <!-- Кампании: шапка + сводка + список (вид мокапа) -->
+  <div id="campaigns-dash" style="max-width:1040px;margin:0 auto;padding:4px 0 24px">
+    <div style="display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:18px">
+      <div style="flex:1;min-width:240px">
+        <h2 style="font-size:26px;font-weight:800;letter-spacing:-.02em;margin:0">Кампании автооткликов</h2>
+        <div style="color:var(--dim);font-size:13px;margin-top:6px;max-width:560px">Сохранённые конфигурации, которые подают отклики на hh.ru от вашего имени. Создавайте отдельную кампанию под каждую роль или гео.</div>
+      </div>
+      <div id="campaigns-acc-chip"></div>
+    </div>
+    <div id="campaigns-summary" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:18px"></div>
+    <div id="campaigns-acc-bar" style="margin-bottom:14px"></div>
+    <div style="display:flex;justify-content:flex-end;margin-bottom:14px">
+      <button class="btn btn-primary" onclick="newCampaign()">+ Новая кампания</button>
+    </div>
+    <div id="campaigns-list"></div>
+  </div>
+  <!-- скрытый таргет для legacy-рендера аккаунтов (не используется в новом виде) -->
+  <div id="accounts-grid" style="display:none"></div>
+
+  <!-- Campaign Configurator -->
+<div id="campaign-configurator" class="card container" style="display:none; max-width: 800px; margin: 0 auto 40px auto; padding: 30px;">
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:24px">
+    <h2 id="campaign-configurator-title" style="font-size: 20px; font-weight: 700; color: var(--text-main); margin:0;flex:1">Новая кампания</h2>
+    <button type="button" class="btn-sm" onclick="closeConfigurator()">Закрыть</button>
+  </div>
+
+  <form id="campaign-form" onsubmit="event.preventDefault(); saveCampaignConfig();">
+    <div class="form-group">
+      <label class="form-label required">Название кампании</label>
+      <input type="text" id="campaign-name" class="form-input" placeholder="Например: DevOps Москва" required>
+    </div>
+    <div class="form-group">
+      <label class="form-label required">Резюме (основное — им идёт отклик)</label>
+      <select id="campaign-resume" class="form-input" required>
+        <option value="">Загрузка резюме...</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Второе резюме (для контекста AI-письма и ответов)</label>
+      <select id="campaign-resume-2" class="form-input">
+        <option value="">— нет (одно резюме) —</option>
+      </select>
+      <div style="font-size:11px;color:var(--dim);margin-top:4px">AI учтёт оба резюме при генерации письма и ответов. Отклик отправляется основным.</div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Резюме из PDF (доп. контекст для AI)</label>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input type="file" id="campaign-pdf" accept="application/pdf,.pdf" onchange="campaignUploadPdf(this)" style="font-size:13px">
+        <button type="button" class="btn-sm" id="campaign-pdf-remove" onclick="campaignRemovePdf()" style="display:none;color:var(--red);border-color:var(--red)">Убрать PDF</button>
+      </div>
+      <div id="campaign-pdf-status" style="font-size:11px;color:var(--dim);margin-top:6px"></div>
+      <div style="font-size:11px;color:var(--dim);margin-top:2px">Текст из PDF добавится в контекст AI наряду с резюме hh. На сам отклик не влияет.</div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label required">Поисковый запрос</label>
+      <input type="text" id="campaign-query" class="form-input" placeholder="Например: DevOps, DevOps engineer, SRE" required oninput="campaignValidateQuery()">
+      <div class="form-hint error" id="campaign-query-error">Обязательное поле — без него кампания не сможет искать вакансии.</div>
+      <div class="form-hint" id="campaign-query-ok" style="display:none">Запрос задан.</div>
+      <div class="form-hint">Несколько запросов через запятую — ищет по каждому отдельно. Удобно для русского и английского названия одной роли: <b>инженер, engineer</b> или <b>DevOps, SRE, DevOps engineer</b>.</div>
+    </div>
+    
+    <div class="form-group">
+      <label class="form-label">Регион</label>
+      <select id="campaign-region" class="form-input">
+        <option value="">Любой</option>
+        <option value="113">Россия</option>
+        <option value="1">Москва</option>
+        <option value="2">Санкт-Петербург</option>
+      </select>
+    </div>
+    
+    <div class="mockup-checkbox">
+      <input type="checkbox" id="campaign-remote">
+      <label for="campaign-remote" class="checkbox-text">
+        <span class="checkbox-title" style="font-weight: 400">Удалённая работа</span>
+      </label>
+    </div>
+    
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Зарплата от</label>
+        <input type="number" id="campaign-salary" class="form-input" placeholder="0">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Опыт</label>
+        <select id="campaign-exp" class="form-input">
+          <option value="any">Любой</option>
+          <option value="noExperience">Нет опыта</option>
+          <option value="between1And3">От 1 года до 3 лет</option>
+          <option value="between3And6">От 3 до 6 лет</option>
+          <option value="moreThan6">Более 6 лет</option>
+        </select>
+      </div>
+    </div>
+    
+    <div class="form-row" style="margin-top: 20px;">
+      <div class="form-group">
+        <label class="form-label">Откликов в день</label>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <input type="number" id="campaign-daily-min" class="form-input" value="8" style="width: 100px;">
+          <span class="range-separator">—</span>
+          <input type="number" id="campaign-daily-max" class="form-input" value="15" style="width: 100px;">
+        </div>
+        <div class="form-hint">Случайно в этом диапазоне каждый день.</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label required">Сколько откликов отправить</label>
+        <input type="number" id="campaign-total" class="form-input" value="50" min="1" style="font-weight:700;font-size:16px">
+        <div class="form-hint">Кампания остановится сама, набрав это количество. Указывай явно — это главный предохранитель (0 = без лимита, бот будет слать пока не остановишь).</div>
+      </div>
+    </div>
+    
+    <!-- Accordion: Additional Params -->
+    <div class="accordion" id="campaign-accordion" style="margin-top: 30px;">
+      <div class="accordion-header" onclick="this.parentElement.classList.toggle('active')">
+        <span>Дополнительные параметры</span>
+        <span></span>
+      </div>
+      <div class="accordion-content">
+        <div class="form-group">
+          <label class="form-label">Отрасль компании</label>
+          <select id="campaign-industry" class="form-input"><option value="">Любая отрасль</option></select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">График работы</label>
+          <select id="campaign-schedule" class="form-input">
+            <option value="any">Любой</option>
+            <option value="fullDay">Полный день</option>
+            <option value="shift">Сменный график</option>
+            <option value="flexible">Гибкий график</option>
+            <option value="remote">Удалённая работа</option>
+            <option value="flyInFlyOut">Вахтовый метод</option>
+          </select>
+        </div>
+        
+        <div class="form-group">
+          <label class="form-label">Оформление</label>
+          <div class="form-hint" style="margin-bottom:8px;">Пропускать вакансии с неподходящим типом договора.</div>
+          <div class="segment-control" id="campaign-employment-seg">
+            <button type="button" class="btn" data-val="any" onclick="setEmployment('any', this)">Любое</button>
+            <button type="button" class="btn" data-val="full" onclick="setEmployment('full', this)">Только ТК РФ</button>
+            <button type="button" class="btn" data-val="project" onclick="setEmployment('project', this)">Только ГПХ</button>
+          </div>
+          <input type="hidden" id="campaign-employment" value="any">
+        </div>
+        
+        <div class="form-group">
+          <label class="form-label">Стоп-слова / чёрный список</label>
+          <input type="text" id="campaign-stopwords" class="form-input" placeholder="Введите через запятую: Битрикс, Билайн">
+          <div class="form-hint">Вакансии, в названии или компании которых есть эти слова, будут пропущены</div>
+        </div>
+        
+        <div class="mockup-checkbox">
+          <input type="checkbox" id="campaign-24-7" checked>
+          <label for="campaign-24-7" class="checkbox-text"><span class="checkbox-title">Без ограничения по времени (24/7)</span></label>
+        </div>
+        
+        <div class="mockup-checkbox">
+          <input type="checkbox" id="campaign-salary-only">
+          <label for="campaign-salary-only" class="checkbox-text"><span class="checkbox-title">Только вакансии с указанной зарплатой</span></label>
+        </div>
+        
+        <div class="mockup-checkbox">
+          <input type="checkbox" id="campaign-accredited">
+          <label for="campaign-accredited" class="checkbox-text"><span class="checkbox-title">Только аккредитованные ИТ-компании</span></label>
+        </div>
+        
+        <div class="mockup-checkbox">
+          <input type="checkbox" id="campaign-strict-match" checked>
+          <label for="campaign-strict-match" class="checkbox-text">
+            <span class="checkbox-title">Искать только по названию вакансии</span>
+            <span class="checkbox-desc">Запрос ищется только в НАЗВАНИИ вакансии, а не в описании. «Devops» → только вакансии, где Devops есть в названии (лишние слова не мешают: «Lead DevOps Engineer» подходит).</span>
+          </label>
+        </div>
+        
+        <div class="mockup-checkbox">
+          <input type="checkbox" id="campaign-ai-letter" checked>
+          <label for="campaign-ai-letter" class="checkbox-text"><span class="checkbox-title">Генерировать сопроводительное письмо (AI)</span></label>
+        </div>
+        
+        <div class="mockup-checkbox">
+          <input type="checkbox" id="campaign-ai-answer" checked>
+          <label for="campaign-ai-answer" class="checkbox-text"><span class="checkbox-title">Отвечать на вопросы работодателя (AI)</span></label>
+        </div>
+        
+        <!-- Personalization Inner Box -->
+        <div style="background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-top: 16px;">
+          <label class="form-label">Персонализация письма</label>
+          <div class="form-hint" style="margin-bottom: 16px;">Эти поля передаются в AI, чтобы письмо звучало правильно и содержало ваши контакты.</div>
+          
+          <div class="form-group">
+            <label class="form-label" style="font-weight: 400">Пол</label>
+            <div class="segment-control" id="campaign-gender-seg">
+              <button type="button" class="btn" data-val="none" onclick="setGender('none', this)">Без выбора</button>
+              <button type="button" class="btn" data-val="male" onclick="setGender('male', this)">Мужской</button>
+              <button type="button" class="btn" data-val="female" onclick="setGender('female', this)">Женский</button>
+            </div>
+            <input type="hidden" id="campaign-gender" value="none">
+          </div>
+          
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" style="font-weight: 400">Телефон (необяз.)</label>
+              <input type="text" id="campaign-phone" class="form-input" placeholder="+7 999 123 45 67">
+            </div>
+            <div class="form-group">
+              <label class="form-label" style="font-weight: 400">Telegram (необяз.)</label>
+              <input type="text" id="campaign-tg" class="form-input" placeholder="@username">
+            </div>
+          </div>
+          
+        </div>
+
+        <!-- Скорость и поведение -->
+        <div style="background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-top: 16px;">
+          <label class="form-label">Скорость и поведение</label>
+          <div class="form-hint" style="margin-bottom: 12px;">Пусто = глобальные настройки. Меньше и медленнее — безопаснее для лимитов hh.ru.</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" style="font-weight: 400">Откликов за пачку</label>
+              <input type="number" id="campaign-batch" class="form-input" min="1" max="20" placeholder="по умолч.">
+            </div>
+            <div class="form-group">
+              <label class="form-label" style="font-weight: 400">Задержка, сек</label>
+              <input type="number" id="campaign-delay" class="form-input" min="0" max="60" placeholder="по умолч.">
+            </div>
+          </div>
+          <div class="mockup-checkbox">
+            <input type="checkbox" id="campaign-skip-inconsistent">
+            <label for="campaign-skip-inconsistent" class="checkbox-text"><span class="checkbox-title">Пропускать вакансии с несовпадением опыта (доп. проверка)</span></label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Предпросмотр письма (ничего не отправляет) -->
+    <div id="campaign-preview-panel" style="display:none;margin-top:18px;padding:14px 16px;background:var(--bg-card2);border:1px solid var(--border);border-radius:8px">
+      <div id="campaign-preview-meta" style="font-size:12px;color:var(--dim);margin-bottom:8px"></div>
+      <div id="campaign-preview-text" style="white-space:pre-wrap;font-size:13px;line-height:1.5;color:var(--text-main)"></div>
+    </div>
+
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:20px">
+      <button type="button" class="btn" onclick="previewLetter(this)">Предпросмотр письма</button>
+      <button type="submit" class="btn primary">Сохранить кампанию</button>
+      <button type="button" class="btn" onclick="closeConfigurator()">Отмена</button>
+    </div>
+    <div style="font-size:12px;margin-top:10px;color:var(--dim)">Запуск — кнопкой «Запустить» в списке кампаний после сохранения.</div>
+    <div id="campaign-action-status" style="font-size:12px;margin-top:10px;color:var(--dim)"></div>
+  </form>
+</div>
+<!-- End Campaign Configurator -->
+
+</div>
+
+<!-- LLM Replies Tab -->
+<div id="panel-llm" class="panel" style="padding:16px">
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap">
+    <div style="font-size:15px;font-weight:700">Ответы в чатах с HR</div>
+    <button id="llm-global-toggle-btn" onclick="llmGlobalToggle(this)"
+      title="Включает/выключает генерацию черновиков ответов. Отправку всё равно подтверждаешь вручную."
+      style="padding:4px 14px;border-radius:4px;border:1px solid var(--dim);background:transparent;cursor:pointer;font-size:12px;color:var(--dim)">
+      ВЫКЛ
+    </button>
+    <span id="llm-log-count" style="font-size:11px;color:var(--dim);margin-left:auto"></span>
+  </div>
+  <!-- Пояснение/безопасность -->
+  <div style="background:var(--bg-card);border:1px solid var(--border);border-left:3px solid var(--green);border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:12px;line-height:1.5;color:var(--dim)">
+    Это только переписка с HR. <b style="color:var(--text)">Отклики на вакансии тут НЕ отправляются</b> — только в разделе «Кампании».
+    Бот готовит черновики ответов и кладёт их в очередь ниже; работодателю ничего не уходит, пока ты не нажмёшь «Отправить».
+  </div>
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+    <select id="llm-log-acc-filter" class="form-input" style="font-size:11px;padding:3px 6px" onchange="llmInterviewsLoad()">
+      <option value="">Все аккаунты</option>
+    </select>
+    <select id="llm-log-sent-filter" class="form-input" style="font-size:11px;padding:3px 6px" onchange="llmInterviewsLoad()">
+      <option value="">Все статусы</option>
+      <option value="pending_reply">Ждёт ответа</option>
+      <option value="draft">Черновик</option>
+      <option value="replied">Отправлено</option>
+      <option value="no_reply_needed">— Ответ не нужен</option>
+      <option value="chat_closed">Чат закрыт</option>
+      <option value="robot">Робот-рекрутер</option>
+      <option value="waiting_hr">Ждём HR</option>
+    </select>
+    <button class="btn" onclick="llmInterviewsLoad()" title="Перечитать таблицу истории переписок из базы (ничего не отправляет)">Обновить таблицу</button>
+    <button class="btn" onclick="llmResetReplied(this)" style="font-size:11px;padding:3px 8px;color:var(--dim);opacity:.7" title="Очистить отметку «уже отвечали» — бот заново подготовит черновики по всем чатам. Нужно редко.">Сбросить историю</button>
+  </div>
+  <!-- LLM Status bar -->
+  <div id="llm-status-bar" style="background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:12px;display:flex;gap:16px;flex-wrap:wrap;align-items:center">
+    <span id="llm-st-state" style="font-weight:600">—</span>
+    <span id="llm-st-interval" style="color:var(--dim)">—</span>
+    <span id="llm-st-chats" style="color:var(--cyan)">—</span>
+    <span id="llm-st-replied" style="color:var(--green)">—</span>
+  </div>
+
+  <!-- Очередь черновиков на подтверждение -->
+  <div id="llm-queue-box" style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:14px;background:var(--bg-card)">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+      <div style="font-size:14px;font-weight:700">Очередь ответов</div>
+      <span id="llm-queue-count" style="font-size:12px;color:var(--dim)">0 в очереди</span>
+      <div style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="llmQueueRefresh(this)" title="Бот прочитает новые сообщения HR и подготовит черновики ответов. Ничего не отправляет.">1 · Подготовить черновики</button>
+        <button class="btn" onclick="llmQueueSend(this)" style="background:var(--green);color:#000;border-color:var(--green)" title="Отправить все черновики из очереди работодателям">Отправить все</button>
+      </div>
+    </div>
+    <div style="font-size:12px;color:var(--dim);margin-bottom:10px;line-height:1.6">
+      <b style="color:var(--text)">1.</b> «Подготовить черновики» — бот напишет ответы. &nbsp;
+      <b style="color:var(--text)">2.</b> Прочитай, при желании поправь текст прямо в поле. &nbsp;
+      <b style="color:var(--text)">3.</b> «Отправить» под нужным ответом — или «Отправить все» сразу.
+      <br>Работодателю ничего не уходит до шага 3.
+    </div>
+    <div id="llm-queue-list" style="display:flex;flex-direction:column;gap:10px">
+      <div style="color:var(--dim);font-size:12px">Очередь пуста. «Подготовить черновики» — бот прочитает новые сообщения HR и составит ответы для проверки.</div>
+    </div>
+  </div>
+
+  <!-- Per-account LLM toggles -->
+  <div id="llm-acc-toggles" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"></div>
+
+  <!-- Per-account stats -->
+  <div id="llm-acc-stats" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px"></div>
+
+  <!-- LLM debug log -->
+  <details id="llm-debug-details" style="margin-bottom:14px" open>
+    <summary style="cursor:pointer;font-size:12px;color:var(--dim);user-select:none;padding:4px 0;list-style:none">
+      Отладочный лог LLM <span id="llm-debug-count" style="font-size:11px"></span>
+    </summary>
+    <div id="llm-debug-log" style="margin-top:6px;max-height:240px;overflow-y:auto;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:6px 8px;font-size:11px;font-family:monospace;display:flex;flex-direction:column;gap:2px">
+      <span style="color:var(--dim)">Обновится автоматически через 300мс...</span>
+    </div>
+  </details>
+
+  <!-- Interviews DB table -->
+  <div style="overflow-x:auto">
+    <table class="data-table" id="llm-interviews-table" style="display:none">
+      <thead>
+        <tr>
+          <th style="width:95px">Обнаружен</th>
+          <th style="width:75px">Аккаунт</th>
+          <th style="width:130px">Работодатель</th>
+          <th style="width:180px">Вакансия</th>
+          <th>Сообщение работодателя</th>
+          <th>Ответ LLM</th>
+          <th style="width:90px">Статус</th>
+          <th style="width:80px">Чат</th>
+        </tr>
+      </thead>
+      <tbody id="llm-interviews-body"></tbody>
+    </table>
+    <div id="llm-interviews-empty" style="color:var(--dim);font-size:12px;display:none">
+      Нет данных. Переговоры появятся после первого опроса HH-статистики (~15 мин).
+    </div>
+  </div>
+</div>
+
+<!-- Settings Tab -->
+<div id="panel-settings" class="panel">
+  <div class="settings-layout">
+    <!-- Settings Sidebar -->
+    <div class="settings-sidebar">
+      <div class="settings-tab active" onclick="switchSettingsTab('connection')">Подключение</div>
+      <div class="settings-tab" onclick="switchSettingsTab('search')">Поиск и отклики</div>
+      <div class="settings-tab" onclick="switchSettingsTab('templates')">Шаблоны</div>
+      <div class="settings-tab" onclick="switchSettingsTab('ai')">AI / LLM</div>
+      <div class="settings-tab" onclick="switchSettingsTab('advanced')">Продвинутое</div>
+    </div>
+    
+    <!-- Settings Content -->
+    <div class="settings-content" id="settings-panel">
+      <!-- ═══════ ГРУППА 1: Подключение ═══════ -->
+      <div id="settings-tab-connection" class="settings-subpanel active">
+        <h2 class="settings-page-title">Подключение</h2>
+
+        <!-- Авторизация HH по логину/паролю или кукам -->
+        <details class="q-section prio-critical" open>
+          <summary class="q-section-title">Авторизация в HH.ru (Логин/Пароль или Куки)</summary>
+          <div class="q-section-body">
+            <!-- Tab switcher -->
+            <div style="display:flex;gap:6px;margin-bottom:14px;max-width:320px;">
+              <button id="auth-tab-pass" onclick="authSwitch('pass')" style="flex:1;padding:7px;border:1px solid var(--border);border-radius:5px;background:var(--cyan);color:#000;cursor:pointer;font-family:inherit;font-size:12px;font-weight:600">Пароль</button>
+              <button id="auth-tab-cookie" onclick="authSwitch('cookie')" style="flex:1;padding:7px;border:1px solid var(--border);border-radius:5px;background:transparent;color:var(--dim);cursor:pointer;font-family:inherit;font-size:12px">Вставить куки</button>
+            </div>
+
+            <!-- Mode: Password -->
+            <div id="auth-panel-pass" style="max-width:400px;">
+              <div style="font-size:11px;color:var(--dim);margin-bottom:10px;line-height:1.4">
+                Введи email/телефон и пароль от HH. Бот залогинится и добавит аккаунт.
+              </div>
+              <div style="display:flex;flex-direction:column;gap:10px">
+                <input id="auth-login-input" class="form-input" type="text" placeholder="email@mail.ru или +7***" inputmode="email" autocomplete="username" style="font-size:14px;padding:10px 12px">
+                <input id="auth-pass-input" class="form-input" type="password" placeholder="Пароль" autocomplete="current-password" style="font-size:14px;padding:10px 12px">
+                <button id="auth-login-go" onclick="authHhLogin()" style="padding:10px;background:var(--cyan);color:#000;border:none;border-radius:6px;font-family:inherit;font-size:14px;font-weight:700;cursor:pointer">
+                  Войти
+                </button>
+                <div id="auth-login-status" style="font-size:12px;color:var(--dim);text-align:center;min-height:20px"></div>
+              </div>
+            </div>
+
+            <!-- Mode: Cookie paste -->
+            <div id="auth-panel-cookie" style="display:none;max-width:400px;">
+              <div style="font-size:11px;color:var(--dim);margin-bottom:10px;line-height:1.4">
+                Вставь куки из своего браузера. Лучший способ для телефона — работает всегда, без CAPTCHA.
+              </div>
+              <details style="font-size:11px;color:var(--dim);margin-bottom:10px">
+                <summary style="cursor:pointer;color:var(--cyan);font-weight:600">Как получить куки на телефоне</summary>
+                <div style="margin-top:8px;padding:10px;background:var(--bg-card2);border-radius:6px;line-height:1.6">
+                  <b>Android (Chrome):</b><br>
+                  1. Установи <b>Kiwi Browser</b> из Play Market<br>
+                  2. Открой HH.ru, войди в аккаунт<br>
+                  3. Меню ⋮ → <b>Расширения</b>→ + от<a href="https://chrome.google.com/webstore/detail/cookie-editor/hlkenndednhfkekhgcdicdfddnkalmdm" target="_blank" style="color:var(--cyan)">Cookie-Editor</a><br>
+                  4. Нажми на иконку Cookie-Editor → <b>Export</b>→ скопируй текст<br>
+                  5. Вставь ниже и нажми «Подключить»<br><br>
+                  <b>iOS (Safari):</b><br>
+                  1. Открой HH.ru, войди в аккаунт<br>
+                  2. В адресной строке введи: <code style="background:var(--bg);padding:1px 4px;border-radius:3px">javascript:prompt('',document.cookie)</code><br>
+                  3. Скопируй всё что появится → вставь ниже
+                </div>
+              </details>
+              <textarea id="auth-cookie-input" class="form-input" style="width:100%;min-height:60px;font-size:11px;padding:8px;font-family:monospace" placeholder='hhtoken=xxx; _xsrf=yyy; ...'></textarea>
+              <button id="auth-cookie-go" onclick="authHhCookieConnect()" style="padding:10px;background:var(--green);color:#000;border:none;border-radius:6px;font-family:inherit;font-size:14px;font-weight:700;cursor:pointer;margin-top:8px">
+                Подключить
+              </button>
+              <div id="auth-cookie-status" style="font-size:12px;color:var(--dim);text-align:center;min-height:20px"></div>
+            </div>
+          </div>
+        </details>
+
+    <!-- Browser sessions -->
+    <details class="q-section prio-critical" open>
+      <summary class="q-section-title" data-i18n="sec_sessions">Браузерные сессии</summary>
+      <div class="q-section-body">
+      <div id="sess-list" style="margin-bottom:12px"></div>
+      <details class="session-block" id="session-block">
+        <summary class="session-summary" data-i18n="sess_add">Добавить сессию из браузера</summary>
+        <div class="session-body">
+
+          <!-- Mode toggle -->
+          <div style="display:flex;gap:0;margin-bottom:14px;border:1px solid var(--border);border-radius:5px;overflow:hidden;width:fit-content">
+            <button id="sess-mode-curl" onclick="sessSetMode('curl')"
+              style="padding:5px 14px;font-size:11px;background:var(--cyan);color:#000;border:none;cursor:pointer;font-family:inherit" data-i18n="sess_mode_curl">cURL / строка</button>
+            <button id="sess-mode-manual" onclick="sessSetMode('manual')"
+              style="padding:5px 14px;font-size:11px;background:transparent;color:var(--dim);border:none;cursor:pointer;font-family:inherit" data-i18n="sess_mode_manual">Вручную</button>
+          </div>
+
+          <!-- Mode: cURL -->
+          <div id="sess-panel-curl">
+            <div style="font-size:12px;color:var(--dim);margin-bottom:10px;line-height:1.8">
+              <b data-i18n="sess_curl_desc">Самый простой способ — Copy as cURL:</b><br>
+              1. Откройте <b>hh.ru</b>, войдите в нужный аккаунт<br>
+              2. <b>F12</b>→ вкладка<b>Network</b>→ любой запрос к hh.ru<br>
+              3. Правая кнопка на запросе → <b style="color:var(--cyan)">Copy → Copy as cURL</b><br>
+              4. Вставьте сюда весь скопированный текст — бот сам вытащит cookies
+            </div>
+            <textarea id="session-cookies" class="form-input" rows="4"
+              placeholder="curl 'https://hh.ru/...' -H 'cookie: hhtoken=...' ...&#10;&#10;— или просто строку cookies: hhtoken=xxx; _xsrf=yyy; ..."></textarea>
+          </div>
+
+          <!-- Mode: manual keys -->
+          <div id="sess-panel-manual" style="display:none">
+            <div style="font-size:12px;color:var(--dim);margin-bottom:10px;line-height:1.8">
+              Скопируйте значения ключей из браузера:<br>
+              <b>F12 → Application → Cookies → https://hh.ru</b>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+              <div>
+                <div class="apply-label" style="margin-bottom:3px">hhtoken <span style="color:var(--red)">*</span></div>
+                <input id="ck-hhtoken" class="form-input" type="text" placeholder="Fq8hA...">
+              </div>
+              <div>
+                <div class="apply-label" style="margin-bottom:3px">_xsrf <span style="color:var(--red)">*</span></div>
+                <input id="ck-xsrf" class="form-input" type="text" placeholder="9788d9...">
+              </div>
+              <div>
+                <div class="apply-label" style="margin-bottom:3px">hhul</div>
+                <input id="ck-hhul" class="form-input" type="text" placeholder="747afc...">
+              </div>
+              <div>
+                <div class="apply-label" style="margin-bottom:3px">crypted_id</div>
+                <input id="ck-crypted-id" class="form-input" type="text" placeholder="464B61...">
+              </div>
+            </div>
+          </div>
+
+          <!-- Common fields -->
+          <div style="margin-top:10px">
+            <div class="apply-label" style="margin-bottom:4px" data-i18n="sess_name_label">Имя (необязательно — определится автоматически)</div>
+            <input id="session-name" class="form-input" type="text" placeholder="Например: Мария" data-i18n-ph="sess_name_ph">
+          </div>
+          <div style="margin-top:10px">
+            <div class="apply-label" style="margin-bottom:4px" data-i18n="sess_letter_label">Сопроводительное письмо (необязательно)</div>
+            <textarea id="session-letter" class="form-input" rows="4"
+              placeholder="Если пусто — попытаемся найти из совпадающего аккаунта или оставим пустым"></textarea>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+            <button class="btn" onclick="sessionAdd()" data-i18n="btn_connect">Подключить сессию</button>
+            <span id="session-status" class="text-md text-dim"></span>
+          </div>
+        </div>
+      </details>
+      </div>
+    </details>
+
+    <!-- Account cookies update -->
+    <details class="q-section prio-high">
+      <summary class="q-section-title" data-i18n="sec_cookies">Обновить куки аккаунтов</summary>
+      <div class="q-section-body">
+      <div style="font-size:11px;color:var(--dim);margin-bottom:12px;line-height:1.7">
+        Вставьте новый <b>cURL</b> или строку <b>cookie: hhtoken=…</b> — куки обновятся сразу без перезапуска.<br>
+        Получить: <b>F12 → Network → любой запрос к hh.ru → правая кнопка → Copy as cURL</b>
+      </div>
+      <div id="acc-cookies-list"></div>
+      </div>
+    </details>
+
+      </div>
+
+      <!-- ═══════ ГРУППА 2: Поиск и отклики ═══════ -->
+      <div id="settings-tab-search" class="settings-subpanel">
+        <h2 class="settings-page-title">Поиск и отклики</h2>
+
+    <!-- Bot settings -->
+    <details class="q-section prio-medium" open>
+      <summary class="q-section-title" data-i18n="settings_title">Параметры бота</summary>
+      <div class="q-section-body">
+        <div class="settings-grid" id="settings-grid"></div>
+        <button id="settings-apply" onclick="applySettings()" data-i18n="btn_apply_settings">Применить</button>
+        <div id="settings-status"></div>
+      </div>
+    </details>
+
+    <!-- Work schedule filter + auto-tests -->
+    <details class="q-section prio-medium">
+      <summary class="q-section-title">Фильтры и автоматизация</summary>
+      <div class="q-section-body">
+        <div style="font-size:12px;font-weight:600;margin-bottom:8px;color:var(--cyan)">Умный поиск</div>
+        <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px">
+          <div style="display:flex;align-items:center;gap:8px;font-size:12px">
+            <label class="toggle-switch">
+              <input type="checkbox" id="filter-agencies" 
+                   onchange="sendCmd({type:'set_config',key:'filter_agencies',value:this.checked})">
+              <span class="toggle-slider"></span>
+            </label>
+            <span>Исключить агентства</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;font-size:12px">
+            <label class="toggle-switch">
+              <input type="checkbox" id="filter-low-comp" 
+                   onchange="sendCmd({type:'set_config',key:'filter_low_competition',value:this.checked})">
+              <span class="toggle-slider"></span>
+            </label>
+            <span>Только малоконкурентные (&lt;10 откликов)</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;font-size:12px">
+            Свежесть:
+            <select id="search-period" style="background:var(--bg-card2);color:var(--text-main);border:1px solid var(--border);border-radius:3px;padding:2px 6px;font-size:12px;font-family:inherit"
+                    onchange="sendCmd({type:'set_config',key:'search_period_days',value:parseInt(this.value)})">
+              <option value="0">Все</option><option value="1">1 день</option><option value="3">3 дня</option><option value="7">7 дней</option><option value="14">14 дней</option><option value="30">30 дней</option>
+            </select>
+          </div>
+        </div>
+        <div style="font-size:11px;color:var(--dim);margin-bottom:12px">
+          Фильтры добавляются к поисковым URL. Работают для веб-поиска и OAuth.
+        </div>
+        <div style="border-top:1px solid var(--border);padding-top:12px;margin-bottom:4px"></div>
+        <div style="font-size:12px;font-weight:600;margin-bottom:8px;color:var(--cyan)">Формат работы</div>
+        <div style="font-size:11px;color:var(--dim);margin-bottom:8px">
+          Отмечены = разрешены. Если ничего не отмечено — пропускаются все форматы (без фильтра).
+        </div>
+        <div id="schedule-checks" style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px">
+          <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer">
+            <input type="checkbox" class="sched-cb" value="remote" style="accent-color:var(--green)"> Удалённая
+          </label>
+          <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer">
+            <input type="checkbox" class="sched-cb" value="fullDay" style="accent-color:var(--cyan)"> Полный день
+          </label>
+          <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer">
+            <input type="checkbox" class="sched-cb" value="flexible" style="accent-color:var(--yellow)"> Гибкий
+          </label>
+          <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer">
+            <input type="checkbox" class="sched-cb" value="shift" style="accent-color:var(--dim)"> Сменный
+          </label>
+          <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer">
+            <input type="checkbox" class="sched-cb" value="flyInFlyOut" style="accent-color:var(--red)"> Вахта
+          </label>
+        </div>
+        <div style="border-top:1px solid var(--border);padding-top:12px;margin-bottom:4px">
+          <div style="font-size:12px;font-weight:600;margin-bottom:8px;color:var(--cyan)">Стоп-слова в заголовке</div>
+          <div style="font-size:11px;color:var(--dim);margin-bottom:6px">
+            Чёрный список: если слово есть в названии вакансии — НЕ откликаемся. Через запятую.
+          </div>
+          <input type="text" id="title-blacklist" class="form-input" style="width:100%;font-size:12px;padding:4px 8px;margin-bottom:10px"
+            placeholder="Senior, Lead, 1С, продажи"
+            onchange="sendCmd({type:'set_config',key:'title_blacklist',value:parseWords(this.value)})">
+          <div style="font-size:11px;color:var(--dim);margin-bottom:6px">
+            Белый список (необязательно): откликаемся ТОЛЬКО если в названии есть одно из слов. Через запятую.
+          </div>
+          <input type="text" id="title-whitelist" class="form-input" style="width:100%;font-size:12px;padding:4px 8px;margin-bottom:4px"
+            placeholder="Python, Backend"
+            onchange="sendCmd({type:'set_config',key:'title_whitelist',value:parseWords(this.value)})">
+        </div>
+        <div style="border-top:1px solid var(--border);padding-top:12px;margin-bottom:4px">
+          <div style="font-size:12px;font-weight:600;margin-bottom:8px;color:var(--cyan)">Автопрохождение тестов</div>
+          <div style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+            <label class="toggle-switch">
+              <input type="checkbox" id="auto-apply-tests" 
+                   onchange="sendCmd({type:'set_config',key:'auto_apply_tests',value:this.checked})">
+              <span class="toggle-slider"></span>
+            </label>
+            <span>Автоматически заполнять и отправлять опросники при откликах (для всех аккаунтов)</span>
+          </div>
+          <div style="font-size:11px;color:var(--dim);margin-top:4px;margin-left:22px">
+            Если включен LLM — вопросы заполнит нейронка. Иначе используются шаблонные ответы.
+          </div>
+        </div>
+        <div style="border-top:1px solid var(--border);padding-top:12px;margin-bottom:4px">
+          <div style="font-size:12px;font-weight:600;margin-bottom:8px;color:var(--cyan)">Пред-проверка вакансий</div>
+          <div style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+            <label class="toggle-switch">
+              <input type="checkbox" id="skip-inconsistent" 
+                   onchange="sendCmd({type:'set_config',key:'skip_inconsistent',value:this.checked})">
+              <span class="toggle-slider"></span>
+            </label>
+            <span>Пропускать вакансии с несовпадением опыта (pre-check перед откликом)</span>
+          </div>
+          <div style="font-size:11px;color:var(--dim);margin-top:4px;margin-left:22px">
+            Делает дополнительный запрос к HH для каждой вакансии. Замедляет отклики, но пропускает неподходящие.
+          </div>
+        </div>
+        <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:12px">
+          <div style="font-size:12px;font-weight:600;margin-bottom:8px;color:var(--red)">Контроль лимитов</div>
+          <div style="display:flex;gap:16px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+            <div style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+              Дневной лимит:
+              <input type="number" id="daily-apply-limit" class="form-input" style="width:70px;font-size:12px;padding:2px 6px" min="0" max="500" value="0"
+                onchange="sendCmd({type:'set_config',key:'daily_apply_limit',value:parseInt(this.value)||0})">
+              <span class="text-sm text-dim">(0 = без лимита)</span>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+            <label class="toggle-switch">
+              <input type="checkbox" id="stop-on-hh-limit"  checked
+                   onchange="sendCmd({type:'set_config',key:'stop_on_hh_limit',value:this.checked})">
+              <span class="toggle-slider"></span>
+            </label>
+            <span>Полная остановка при лимите HH (не перепроверять, ждать до завтра)</span>
+          </div>
+          <div style="font-size:11px;color:var(--dim);margin-top:4px;margin-left:22px">
+            Если включено — бот ставит паузу при лимите. Снимите паузу вручную или дождитесь 00:00 МСК.
+          </div>
+        </div>
+        <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:12px">
+          <div style="font-size:12px;font-weight:600;margin-bottom:8px;color:var(--green)">Метод откликов</div>
+          <div style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+            <label class="toggle-switch">
+              <input type="checkbox" id="use-oauth-apply" 
+                   onchange="sendCmd({type:'set_config',key:'use_oauth_apply',value:this.checked})">
+              <span class="toggle-slider"></span>
+            </label>
+            <span>OAuth API (через токен Android-приложения — без капчи, чистый JSON)</span>
+          </div>
+          <div style="font-size:11px;color:var(--dim);margin-top:4px;margin-left:22px">
+            Если выключено — отклики через Web (cookies). OAuth быстрее и не требует капчи, но один запрос за раз (не пакетом).
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <!-- URL pool -->
+    <details class="q-section prio-medium">
+      <summary class="q-section-title" data-i18n="sec_url_pool">Пул поисковых запросов</summary>
+      <div class="q-section-body">
+      <div style="font-size:11px;color:var(--dim);margin-bottom:12px">
+        Добавьте URL-адреса поиска вакансий — они появятся как чекбоксы на карточке каждого аккаунта.
+        Поле <b>стр.</b> задаёт глубину поиска (кол-во страниц) для конкретного запроса; если пусто — используется глобальное значение из слайдера выше.
+      </div>
+      <div id="url-pool-rows"></div>
+      <div style="display:flex;gap:8px;margin-top:10px;align-items:center">
+        <button class="btn" onclick="urlPoolAddRow()" data-i18n="btn_add_url">Добавить URL</button>
+        <button class="btn" onclick="urlPoolSave(this)" data-i18n="btn_save_pool">Сохранить пул</button>
+        <span id="url-pool-st" class="text-sm text-dim"></span>
+      </div>
+      </div>
+    </details>
+
+      </div>
+
+      <!-- ═══════ ГРУППА 3: Шаблоны ═══════ -->
+      <div id="settings-tab-templates" class="settings-subpanel">
+        <h2 class="settings-page-title">Шаблоны</h2>
+
+    <!-- Letter templates -->
+    <details class="q-section prio-low">
+      <summary class="q-section-title" data-i18n="sec_letters">Шаблоны писем</summary>
+      <div class="q-section-body">
+      <div style="font-size:11px;color:var(--dim);margin-bottom:12px" data-i18n="sec_letters_desc">
+        Создайте именованные шаблоны — они появятся в выпадающем списке на каждой карточке аккаунта.
+      </div>
+      <div class="q-templates" id="lt-templates-list"></div>
+      <div class="btn">
+        <button class="btn" onclick="ltAddTemplate()" data-i18n="btn_add_template">Добавить шаблон</button>
+        <button class="btn" onclick="ltSave()" data-i18n="btn_save_templates">Сохранить шаблоны</button>
+      </div>
+      <div class="q-status" id="lt-status"></div>
+      </div>
+    </details>
+
+    <!-- Questionnaire templates -->
+    <details class="q-section prio-low">
+      <summary class="q-section-title" data-i18n="sec_questionnaire">Шаблонные ответы на опросы</summary>
+      <div class="q-section-body">
+      <div style="font-size:11px;color:var(--dim);margin-bottom:10px" data-i18n="sec_questionnaire_desc">
+        Когда вакансия требует опрос — бот автоматически заполнит его.
+        Для каждого шаблона укажи ключевые слова (через запятую) и ответ.
+        Первый совпавший шаблон используется. Последний — ответ по умолчанию.
+      </div>
+      <div style="margin-bottom:14px;padding:10px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:6px">
+        <div style="font-size:12px;font-weight:600;margin-bottom:8px;color:var(--cyan)">Загрузить готовые пресеты</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+          <button class="btn" style="color:var(--green);border-color:var(--green)" onclick="qLoadPreset('universal')">Универсальный</button>
+          <button class="btn" onclick="qLoadPreset('sales')">Продажи / КЦ</button>
+          <button class="btn" onclick="qLoadPreset('office')">Офис / Администратор</button>
+          <button class="btn" onclick="qLoadPreset('remote')">Удалёнка / IT</button>
+        </div>
+        <div class="text-sm text-dim">Заменит текущие шаблоны. Отредактируй ответы под себя и нажми «Сохранить».</div>
+      </div>
+      <div class="q-templates" id="q-templates-list"></div>
+      <div class="q-default-row">
+        <div data-i18n="q_default_label">Ответ по умолчанию (если ни один шаблон не подошёл)</div>
+        <textarea id="q-default-answer" class="q-answer-input" rows="2"
+          placeholder="Готова рассказать подробнее на собеседовании." data-i18n-ph="q_default_ph"></textarea>
+      </div>
+      <div class="btn">
+        <button class="btn" onclick="qAddTemplate()" data-i18n="btn_add_template">Добавить шаблон</button>
+        <button class="btn" onclick="qSave()" data-i18n="btn_save_templates">Сохранить шаблоны</button>
+      </div>
+      <div class="q-status" id="q-status"></div>
+      </div>
+    </details>
+
+      </div>
+
+      <!-- ═══════ ГРУППА 4: AI / LLM ═══════ -->
+      <div id="settings-tab-ai" class="settings-subpanel">
+        <h2 class="settings-page-title">AI / LLM</h2>
+
+    <!-- LLM auto-reply -->
+    <details class="q-section prio-low" id="llm-section">
+      <summary class="q-section-title">LLM Авто-ответы</summary>
+      <div class="q-section-body">
+      <div style="font-size:11px;color:var(--dim);margin-bottom:12px;line-height:1.7">
+        Бот будет автоматически отвечать на сообщения работодателей в переговорах со статусом <b>Интервью</b>.
+        Используется OpenAI-совместимый API (GPT-4o-mini, DeepSeek и др.)
+      </div>
+      <div style="font-size:11px;color:var(--cyan);margin-bottom:10px">
+        Включить/выключить авто-ответы — кнопка во вкладке <b>AI Ответы</b>
+      </div>
+      <div style="display:flex;gap:14px;margin-bottom:8px;align-items:center;flex-wrap:wrap">
+        <div style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+          <label class="toggle-switch">
+              <input type="checkbox" id="llm-auto-send"  checked onchange="_llmMarkEditing()">
+              <span class="toggle-slider"></span>
+          </label>
+          <span>Отправлять автоматически (иначе только в лог)</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+          <label class="toggle-switch">
+              <input type="checkbox" id="llm-use-cover-letter"  checked onchange="_llmMarkEditing()">
+              <span class="toggle-slider"></span>
+          </label>
+          <span>Учитывать сопроводительное письмо</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+          <label class="toggle-switch">
+              <input type="checkbox" id="llm-use-resume"  checked onchange="_llmMarkEditing()">
+              <span class="toggle-slider"></span>
+          </label>
+          <span>Учитывать резюме</span>
+        </div>
+      </div>
+      <div style="margin-bottom:12px">
+        <div style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+          <label class="toggle-switch">
+              <input type="checkbox" id="llm-fill-questionnaire" 
+                 onchange="sendCmd({type:'set_config',key:'llm_fill_questionnaire',value:this.checked})">
+              <span class="toggle-slider"></span>
+          </label>
+          <span>Заполнять опросники нейронкой (textarea + radio + checkbox при откликах)</span>
+        </div>
+        <div style="font-size:11px;color:var(--dim);margin-top:4px;margin-left:22px">
+          Если включено — LLM сам отвечает на вопросы работодателя при отклике. Шаблоны используются как запасной вариант.
+        </div>
+      </div>
+      <div style="margin-bottom:12px">
+        <div style="font-size:11px;color:var(--dim);margin-bottom:6px">
+          Предпросмотр резюме — убедись что парсинг работает корректно:
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select id="llm-resume-acc-sel" class="form-input" style="font-size:11px;padding:3px 6px"></select>
+          <button class="btn" onclick="llmPreviewResume(this)">Загрузить резюме</button>
+          <span id="llm-resume-status" class="text-sm text-dim"></span>
+        </div>
+        <pre id="llm-resume-preview" style="display:none;margin-top:8px;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:4px;font-size:11px;white-space:pre-wrap;max-height:220px;overflow-y:auto;color:var(--fg)"></pre>
+      </div>
+      <div style="margin-bottom:12px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div style="font-size:12px;font-weight:600">API профили</div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <label class="text-sm text-dim" for="llm-profile-mode">Режим:</label>
+            <select id="llm-profile-mode" class="form-input" style="font-size:11px;padding:2px 6px">
+              <option value="fallback">Резерв (первый рабочий)</option>
+              <option value="roundrobin">По очереди</option>
+            </select>
+          </div>
+        </div>
+        <div style="font-size:10px;color:var(--dim);margin-bottom:8px">Ключи не отображаются из соображений безопасности — введите повторно при изменении.</div>
+        <div id="llm-profiles-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px"></div>
+        <button class="btn" onclick="llmProfileAdd()">Добавить профиль</button>
+      </div>
+      <div class="mb-md">
+        <div style="font-size:11px;color:var(--dim);margin-bottom:3px">Системный промпт</div>
+        <textarea id="llm-system-prompt" class="form-input" rows="4" style="font-size:11px"></textarea>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn" onclick="llmSave(this)">Сохранить</button>
+        <span id="llm-status" class="text-sm text-dim"></span>
+      </div>
+      </div>
+    </details>
+
+      </div>
+
+      <!-- ═══════ ГРУППА 5: Продвинутое ═══════ -->
+      <div id="settings-tab-advanced" class="settings-subpanel">
+        <h2 class="settings-page-title">Продвинутое</h2>
+
+    <!-- JSON Editor -->
+    <details class="q-section prio-low">
+      <summary class="q-section-title">JSON-редактор</summary>
+      <div class="q-section-body">
+      <div style="font-size:11px;color:var(--dim);margin-bottom:10px">
+        Прямое редактирование конфигов. Изменения применяются сразу после сохранения.
+      </div>
+      <details class="session-block" id="json-config-details">
+        <summary class="session-summary">config.json</summary>
+        <div class="session-body">
+          <textarea id="json-config-ta" class="form-input" rows="16"
+            style="font-family:monospace;font-size:11px;white-space:pre" spellcheck="false"></textarea>
+          <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+            <button class="btn" onclick="jsonConfigLoad(this)">Обновить</button>
+            <button class="btn" onclick="jsonConfigTemplate()">Шаблон</button>
+            <button class="btn" style="color:var(--green);border-color:var(--green)"
+              onclick="jsonConfigSave(this)">Сохранить</button>
+            <span id="json-config-st" class="text-sm text-dim"></span>
+          </div>
+        </div>
+      </details>
+      <details class="session-block" id="json-accounts-details" style="margin-top:8px">
+        <summary class="session-summary">accounts.json</summary>
+        <div class="session-body">
+          <textarea id="json-accounts-ta" class="form-input" rows="16"
+            style="font-family:monospace;font-size:11px;white-space:pre" spellcheck="false"></textarea>
+          <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+            <button class="btn" onclick="jsonAccountsLoad(this)">Обновить</button>
+            <button class="btn" onclick="jsonAccountsTemplate()">Шаблон</button>
+            <button class="btn" style="color:var(--green);border-color:var(--green)"
+              onclick="jsonAccountsSave(this)">Сохранить</button>
+            <span id="json-accounts-st" class="text-sm text-dim"></span>
+          </div>
+        </div>
+      </details>
+      </div>
+    </details>
+
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ LOGIN MODAL ═══════════ -->
+<div id="login-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center" onclick="if(event.target===this)hideLoginModal()">
+  <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:20px;width:92%;max-width:380px;box-shadow:0 8px 32px rgba(0,0,0,0.5)">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+      <span style="font-size:16px;font-weight:700;color:var(--primary)">Подключить HH-аккаунт</span>
+    </div>
+
+    <!-- Tab switcher -->
+    <div style="display:flex;gap:6px;margin-bottom:14px">
+      <button id="lm-tab-pass" onclick="lmSwitch('pass')" style="flex:1;padding:7px;border:1px solid var(--border);border-radius:5px;background:var(--primary);color:#fff;cursor:pointer;font-family:inherit;font-size:12px;font-weight:600">Пароль</button>
+      <button id="lm-tab-cookie" onclick="lmSwitch('cookie')" style="flex:1;padding:7px;border:1px solid var(--border);border-radius:5px;background:transparent;color:var(--dim);cursor:pointer;font-family:inherit;font-size:12px">Вставить куки</button>
+    </div>
+
+    <!-- Mode: Password -->
+    <div id="lm-panel-pass">
+      <div style="font-size:11px;color:var(--dim);margin-bottom:10px;line-height:1.4">
+        Введи email/телефон и пароль от HH. Бот залогинится и добавит аккаунт.
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <input id="hh-login-input" class="form-input" type="text" placeholder="email@mail.ru или +7***" inputmode="email" autocomplete="username" style="font-size:14px;padding:10px 12px">
+        <input id="hh-pass-input" class="form-input" type="password" placeholder="Пароль" autocomplete="current-password" style="font-size:14px;padding:10px 12px">
+        <button id="hh-login-go" onclick="hhLogin()" style="padding:10px;background:var(--primary);color:#fff;border:none;border-radius:6px;font-family:inherit;font-size:14px;font-weight:700;cursor:pointer">
+          Войти
+        </button>
+        <div id="hh-login-status" style="font-size:12px;color:var(--dim);text-align:center;min-height:20px"></div>
+      </div>
+    </div>
+
+    <!-- Mode: Cookie paste -->
+    <div id="lm-panel-cookie" style="display:none">
+      <div style="font-size:11px;color:var(--dim);margin-bottom:10px;line-height:1.4">
+        Вставь куки из своего браузера. Лучший способ для телефона — работает всегда, без CAPTCHA.
+      </div>
+      <details style="font-size:11px;color:var(--dim);margin-bottom:10px">
+        <summary style="cursor:pointer;color:var(--cyan);font-weight:600">Как получить куки на телефоне</summary>
+        <div style="margin-top:8px;padding:10px;background:var(--bg-card2);border-radius:6px;line-height:1.6">
+          <b>Android (Chrome):</b><br>
+          1. Установи <b>Kiwi Browser</b> из Play Market<br>
+          2. Открой HH.ru, войди в аккаунт<br>
+          3. Меню ⋮ → <b>Расширения</b>→ + от<a href="https://chrome.google.com/webstore/detail/cookie-editor/hlkenndednhfkekhgcdicdfddnkalmdm" target="_blank" style="color:var(--cyan)">Chrome Web Store</a><br>
+          4. Нажми на иконку Cookie-Editor → <b>Export</b>→ скопируй текст<br>
+          5. Вставь ниже и нажми «Подключить»<br><br>
+          <b>iOS (Safari):</b><br>
+          1. Открой HH.ru, войди в аккаунт<br>
+          2. В адресной строке введи: <code style="background:var(--bg);padding:1px 4px;border-radius:3px">javascript:prompt('',document.cookie)</code><br>
+          3. Скопируй всё что появится → вставь ниже
+        </div>
+      </details>
+      <textarea id="hh-cookie-input" class="form-input" style="width:100%;min-height:60px;font-size:11px;padding:8px;font-family:monospace" placeholder='hhtoken=xxx; _xsrf=yyy; ...'></textarea>
+      <button id="hh-cookie-go" onclick="hhCookieConnect()" style="padding:10px;background:var(--green);color:#fff;border:none;border-radius:6px;font-family:inherit;font-size:14px;font-weight:700;cursor:pointer;margin-top:8px">
+        Подключить
+      </button>
+      <div id="hh-cookie-status" style="font-size:12px;color:var(--dim);text-align:center;min-height:20px"></div>
+    </div>
+
+    <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:11px;color:var(--dim);text-align:center">
+      Пароль не сохраняется. Только куки. HTTPS включён.
+    </div>
+  </div>
+</div>
+
+<script>
+function completeAuthFlow() {
+  try {
+    localStorage.setItem('hh-auth-complete', '1');
+    localStorage.setItem('hh-tab', 'main');
+  } catch(e) {}
+  document.body.classList.remove('auth-required');
+  document.body.classList.add('dashboard-authenticated');
+  const authTab = document.querySelector('.tab[data-tab="auth"]');
+  if (authTab) authTab.hidden = true;
+  if (typeof switchTab === 'function') switchTab('main');
+}
+
+function showLoginModal() {
+  const m = document.getElementById('login-modal');
+  if (m) m.style.display = 'flex';
+  lmSwitch('pass');
+  document.getElementById('hh-login-input').value = '';
+  document.getElementById('hh-pass-input').value = '';
+  document.getElementById('hh-login-status').textContent = '';
+  document.getElementById('hh-cookie-input').value = '';
+  document.getElementById('hh-cookie-status').textContent = '';
+  setTimeout(() => document.getElementById('hh-login-input').focus(), 100);
+}
+function hideLoginModal() {
+  const m = document.getElementById('login-modal');
+  if (m) m.style.display = 'none';
+}
+function lmSwitch(mode) {
+  const pass = document.getElementById('lm-panel-pass');
+  const cookie = document.getElementById('lm-panel-cookie');
+  const tabPass = document.getElementById('lm-tab-pass');
+  const tabCookie = document.getElementById('lm-tab-cookie');
+  if (mode === 'pass') {
+    pass.style.display = ''; cookie.style.display = 'none';
+    tabPass.style.background = 'var(--primary)'; tabPass.style.color = '#fff'; tabPass.style.fontWeight = '600';
+    tabCookie.style.background = 'transparent'; tabCookie.style.color = 'var(--dim)'; tabCookie.style.fontWeight = '400';
+  } else {
+    pass.style.display = 'none'; cookie.style.display = '';
+    tabCookie.style.background = 'var(--primary)'; tabCookie.style.color = '#fff'; tabCookie.style.fontWeight = '600';
+    tabPass.style.background = 'transparent'; tabPass.style.color = 'var(--dim)'; tabPass.style.fontWeight = '400';
+    setTimeout(() => document.getElementById('hh-cookie-input').focus(), 100);
+  }
+}
+async function hhLogin() {
+  const login = document.getElementById('hh-login-input').value.trim();
+  const password = document.getElementById('hh-pass-input').value;
+  const btn = document.getElementById('hh-login-go');
+  const status = document.getElementById('hh-login-status');
+
+  if (!login || !password) {
+    status.textContent = 'Заполни оба поля';
+    status.style.color = 'var(--yellow)';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Вход...';
+  status.textContent = '';
+  status.style.color = 'var(--dim)';
+
+  try {
+    const r = await fetch('/api/hh-login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({login, password})
+    });
+    const data = await r.json();
+
+    if (data.status === 'ok') {
+      completeAuthFlow();
+      const msg = data.message || 'Успешно!';
+      status.textContent = msg.replace(/\n/g, ' · ');
+      status.style.color = 'var(--green)';
+      status.style.fontSize = '12px';
+      status.style.whiteSpace = 'pre-line';
+      const loginBtn = document.getElementById('hh-login-btn');
+      if (loginBtn) {
+        loginBtn.textContent = 'Подключено';
+        loginBtn.style.opacity = '0.6';
+        loginBtn.style.cursor = 'default';
+        loginBtn.onclick = null;
+      }
+      setTimeout(() => { location.reload(); }, 2000);
+    } else {
+      status.textContent = data.message || 'Ошибка входа';
+      status.style.color = 'var(--red)';
+      status.style.fontSize = '12px';
+    }
+  } catch(e) {
+    status.textContent = 'Ошибка соединения:' + e.message;
+    status.style.color = 'var(--red)';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Войти';
+  }
+}
+async function hhCookieConnect() {
+  const raw = document.getElementById('hh-cookie-input').value.trim();
+  const btn = document.getElementById('hh-cookie-go');
+  const status = document.getElementById('hh-cookie-status');
+
+  if (!raw) {
+    status.textContent = 'Вставь куки или cURL строку';
+    status.style.color = 'var(--yellow)';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Подключаю…';
+  status.textContent = '';
+  status.style.color = 'var(--dim)';
+
+  try {
+    const r = await fetch('/api/session/add', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({cookies: raw})
+    });
+    const data = await r.json();
+
+    if (data.status === 'ok') {
+      completeAuthFlow();
+      status.textContent = 'Подключено!' + (data.name || 'сессия добавлена');
+      status.style.color = 'var(--green)';
+      const loginBtn = document.getElementById('hh-login-btn');
+      if (loginBtn) {
+        loginBtn.textContent = 'Подключено';
+        loginBtn.style.opacity = '0.6';
+        loginBtn.style.cursor = 'default';
+        loginBtn.onclick = null;
+      }
+      setTimeout(() => { location.reload(); }, 2000);
+    } else {
+      status.textContent = '' + (data.error || 'Не удалось подключить');
+      status.style.color = 'var(--red)';
+    }
+  } catch(e) {
+    status.textContent = 'Ошибка:' + e.message;
+    status.style.color = 'var(--red)';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Подключить';
+  }
+}
+
+function authSwitch(mode) {
+  const pass = document.getElementById('auth-panel-pass');
+  const cookie = document.getElementById('auth-panel-cookie');
+  const tabPass = document.getElementById('auth-tab-pass');
+  const tabCookie = document.getElementById('auth-tab-cookie');
+  if (mode === 'pass') {
+    pass.style.display = ''; cookie.style.display = 'none';
+    tabPass.style.background = 'var(--primary)'; tabPass.style.color = '#fff'; tabPass.style.fontWeight = '600';
+    tabCookie.style.background = 'transparent'; tabCookie.style.color = 'var(--dim)'; tabCookie.style.fontWeight = '400';
+  } else {
+    pass.style.display = 'none'; cookie.style.display = '';
+    tabCookie.style.background = 'var(--primary)'; tabCookie.style.color = '#fff'; tabCookie.style.fontWeight = '600';
+    tabPass.style.background = 'transparent'; tabPass.style.color = 'var(--dim)'; tabPass.style.fontWeight = '400';
+    setTimeout(() => document.getElementById('auth-cookie-input').focus(), 100);
+  }
+}
+
+async function authHhLogin() {
+  const login = document.getElementById('auth-login-input').value.trim();
+  const password = document.getElementById('auth-pass-input').value;
+  const btn = document.getElementById('auth-login-go');
+  const status = document.getElementById('auth-login-status');
+
+  if (!login || !password) {
+    status.textContent = 'Заполни оба поля';
+    status.style.color = 'var(--yellow)';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Вход...';
+  status.textContent = '';
+  status.style.color = 'var(--dim)';
+
+  try {
+    const r = await fetch('/api/hh-login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({login, password})
+    });
+    const data = await r.json();
+
+    if (data.status === 'ok') {
+      completeAuthFlow();
+      const msg = data.message || 'Успешно!';
+      status.textContent = msg.replace(/\n/g, ' · ');
+      status.style.color = 'var(--green)';
+      status.style.fontSize = '12px';
+      setTimeout(() => { location.reload(); }, 2000);
+    } else {
+      status.textContent = data.message || 'Ошибка входа';
+      status.style.color = 'var(--red)';
+      status.style.fontSize = '12px';
+    }
+  } catch(e) {
+    status.textContent = 'Ошибка соединения:' + e.message;
+    status.style.color = 'var(--red)';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Войти';
+  }
+}
+
+async function authHhCookieConnect() {
+  const raw = document.getElementById('auth-cookie-input').value.trim();
+  const btn = document.getElementById('auth-cookie-go');
+  const status = document.getElementById('auth-cookie-status');
+
+  if (!raw) {
+    status.textContent = 'Вставь куки или cURL строку';
+    status.style.color = 'var(--yellow)';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Подключаю…';
+  status.textContent = '';
+  status.style.color = 'var(--dim)';
+
+  try {
+    const r = await fetch('/api/session/add', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({cookies: raw})
+    });
+    const data = await r.json();
+
+    if (data.status === 'ok') {
+      completeAuthFlow();
+      status.textContent = 'Подключено!' + (data.name || 'сессия добавлена');
+      status.style.color = 'var(--green)';
+      setTimeout(() => { location.reload(); }, 2000);
+    } else {
+      status.textContent = '' + (data.error || 'Не удалось подключить');
+      status.style.color = 'var(--red)';
+    }
+  } catch(e) {
+    status.textContent = 'Ошибка:' + e.message;
+    status.style.color = 'var(--red)';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Подключить';
+  }
+}
+
+function switchSettingsTab(tabId) {
+  // Hide all subpanels
+  document.querySelectorAll('.settings-subpanel').forEach(el => el.classList.remove('active'));
+  // Show target subpanel
+  const target = document.getElementById('settings-tab-' + tabId);
+  if(target) target.classList.add('active');
+  // Update sidebar tabs
+  document.querySelectorAll('.settings-sidebar .settings-tab').forEach(el => el.classList.remove('active'));
+  if (event && event.currentTarget) {
+    event.currentTarget.classList.add('active');
+  }
+}
+
+let currentWizardStep = 1;
+function wizardGo(step) {
+  if (step < 1 || step > 4) return;
+  currentWizardStep = step;
+  
+  // Update step indicators
+  document.querySelectorAll('.wizard-step').forEach(el => {
+    const s = parseInt(el.getAttribute('data-wiz'));
+    if (s === step) {
+      el.classList.add('active');
+      el.classList.remove('completed');
+    } else if (s < step) {
+      el.classList.remove('active');
+      el.classList.add('completed');
+    } else {
+      el.classList.remove('active', 'completed');
+    }
+  });
+
+  // Update panels
+  document.querySelectorAll('.wizard-panel').forEach(el => el.classList.remove('active'));
+  document.querySelector('.wizard-panel[data-wiz-panel="'+step+'"]').classList.add('active');
+}
+
+function wizardNext() { wizardGo(currentWizardStep + 1); }
+function wizardPrev() { wizardGo(currentWizardStep - 1); }
+
+function wizardFinish() {
+  // Try to start the bot
+  sendCmd({type: 'global_resume'});
+  // Switch to main tab
+  switchTab('main');
+}
+
+function wizardDismiss() {
+  document.getElementById('onboarding-wizard').style.display = 'none';
+  const mainPanel = document.getElementById('panel-main');
+  if (mainPanel) mainPanel.style.display = 'block';
+  // Let the user figure out the settings manually
+  switchTab('settings');
+}
+</script>
+
+<script src="/static/js/app_v6.js?v=42"></script>
+
+
+    </div>
+  </main>
+  
+</div>
+</body>
+</html>

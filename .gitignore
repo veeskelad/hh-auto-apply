@@ -1,0 +1,40 @@
+# Данные пользователя
+data/
+data/notifications/*.json
+
+# Секреты (.env с паролями); .env.example остаётся в репо
+.env
+
+# Python
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Логи
+*.log
+.venv/
+
+# Локальное: бэкапы данных, сертификаты, служебные каталоги агентов
+.backups/
+ssl/
+.playwright-mcp/
+.superpowers/
+execution/logs/
