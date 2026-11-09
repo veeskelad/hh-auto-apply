@@ -14,12 +14,15 @@ API: вызывает REST эндпоинты HH дашборда (localhost:800
 """
 
 import json
+import os
 import sys
 import urllib.request
 import urllib.error
 from datetime import datetime
+from pathlib import Path
 
-API_BASE = "http://localhost:8000"
+API_BASE = os.environ.get("HH_API_BASE", "http://127.0.0.1:8000")
+NOTIFY_DIR = Path(os.environ.get("HH_NOTIFY_DIR", Path(__file__).resolve().parent.parent / "data" / "notifications"))
 
 
 def _api_get(path: str) -> dict:
@@ -38,7 +41,7 @@ def _api_post(path: str, data: dict = None) -> dict:
         body = json.dumps(data or {}).encode()
         req = urllib.request.Request(f"{API_BASE}{path}", data=body,
                                      headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=5) as r:
+        with urllib.request.urlopen(req, timeout=60) as r:
             return json.loads(r.read().decode())
     except Exception as e:
         return {"error": str(e)}
@@ -144,6 +147,45 @@ def cmd_log(limit: int = 10) -> str:
     return "\n".join(lines)
 
 
+def _chat_notification(draft_id: str) -> dict:
+    """Последнее уведомление о чате с этим черновиком (там лежат варианты ответа)."""
+    for f in sorted(NOTIFY_DIR.glob("*_chat.json"), key=lambda f: f.name, reverse=True):
+        try:
+            n = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if n.get("draft_id") == draft_id:
+            return n
+    return {}
+
+
+def cmd_reply(draft_id: str = "", *choice) -> str:
+    """Отправить работодателю вариант N из уведомления или свой текст."""
+    text = " ".join(choice).strip()
+    if not draft_id or not text:
+        return "Формат: hh reply <draft_id> <номер варианта или свой текст>"
+    if text.isdigit():
+        n = _chat_notification(draft_id)
+        opts = [o for o in [n.get("reply", "")] + list(n.get("variants") or []) if o]
+        k = int(text)
+        if not 1 <= k <= len(opts):
+            return f"❌ Нет варианта {k} для {draft_id} (есть {len(opts)})"
+        text = opts[k - 1]
+    pending = {d.get("draft_id") for d in (_api_get("/api/llm/pending").get("pending") or [])}
+    if draft_id not in pending:
+        return f"❌ Черновика {draft_id} нет в очереди (дашборд перезапускался или ответ уже ушёл)"
+    r = _api_post("/api/llm/pending/edit", {"id": draft_id, "text": text})
+    if not r.get("ok"):
+        return f"❌ Не удалось поправить черновик: {r.get('error')}"
+    r = _api_post("/api/llm/pending/send", {"ids": [draft_id]})
+    return f"✅ Отправлено: {text}" if r.get("sent") else f"❌ Не отправилось: {r}"
+
+
+def cmd_skip(draft_id: str = "") -> str:
+    r = _api_post("/api/llm/pending/discard", {"ids": [draft_id]})
+    return "🗑 Пропущено" if r.get("removed") else f"❌ Черновика {draft_id} нет в очереди"
+
+
 def cmd_help() -> str:
     return """🤖 **HH Telegram Pульт**
 
@@ -154,6 +196,8 @@ def cmd_help() -> str:
 `/hh-log`    — последние 10 откликов
 `/hh-stats`  — полная статистика (просмотры, приглашения)
 `/hh-help`   — эта справка
+`reply <draft_id> <N|текст>` — ответить работодателю вариантом N или своим текстом
+`skip <draft_id>` — не отвечать
 
 **Пример:** `/hh-status`"""
 
@@ -172,11 +216,13 @@ def main():
         "log": cmd_log,
         "stats": cmd_status,
         "help": cmd_help,
+        "reply": cmd_reply,
+        "skip": cmd_skip,
     }
-    
+
     handler = handlers.get(command)
     if handler:
-        print(handler())
+        print(handler(*sys.argv[2:]) if command in ("reply", "skip") else handler())
     else:
         print(f"❌ Неизвестная команда: {command}\n{cmd_help()}")
 

@@ -39,8 +39,8 @@ from app.hh_api import (
     parse_work_schedules, extract_search_query,
 )
 
-from app.llm import generate_llm_reply
-from app.notify import notify_interview, notify_response, notify_error
+from app.llm import generate_llm_reply, generate_llm_reply_plan, chat_playbook
+from app.notify import notify_interview, notify_response, notify_error, notify_chat, notify_auth_expired
 
 from app.hh_apply import (
     _resolve_letter,
@@ -270,6 +270,12 @@ class BotManager:
 
     def stop(self):
         self._stop_event.set()
+
+    def _mark_cookies_expired(self, state) -> None:
+        """Куки аккаунта протухли: флаг и одно уведомление владельцу (до следующего обновления кук)."""
+        if not state.cookies_expired:
+            notify_auth_expired(state.short)
+        state.cookies_expired = True
 
     def toggle_pause(self):
         self.paused = not self.paused
@@ -1686,7 +1692,7 @@ class BotManager:
                             state.consecutive_errors += 1
                             self._check_auto_pause(state)
                         else:
-                            state.cookies_expired = True
+                            self._mark_cookies_expired(state)
                             state.paused = True
                             self._add_log(
                                 state.short, state.color,
@@ -1792,7 +1798,7 @@ class BotManager:
                 state.status_detail = f"Загрузка {completed}/{total_tasks}"
                 if html and _is_login_page(html):
                     if not (state.use_oauth or CONFIG.use_oauth_apply):
-                        state.cookies_expired = True
+                        self._mark_cookies_expired(state)
                     return url, set(), {}, {}, {}
                 if html:
                     ids = parse_ids(html)
@@ -2122,7 +2128,20 @@ class BotManager:
                 log_debug(f"LLM [{state.short}] {neg_id}: история {len(conversation)} сообщений, резюме {len(resume_text)} симв., отправляю в LLM")
                 self._add_log(state.short, state.color,
                     f"\U0001f916 {progress} [{employer_short}]: история {len(conversation)} сообщ., жду LLM…", "info", neg_id=neg_id)
-                reply_text = generate_llm_reply(conversation, thread.get("employer_name", ""), cover_letter, resume_text)
+                # Есть плейбук — категория решает, отвечать самому или отдать черновик владельцу
+                plan = None
+                if chat_playbook():
+                    plan = generate_llm_reply_plan(conversation, thread.get("employer_name", ""), cover_letter, resume_text)
+                    if plan.get("category") == "no_reply":
+                        reply_text = "[NO_REPLY]"
+                    else:
+                        reply_text = plan.get("reply", "") if plan else ""
+                    if plan:
+                        log_debug(f"LLM [{state.short}] {neg_id}: плейбук → {plan.get('category')} "
+                                  f"({plan.get('confidence')}), авто={plan.get('auto')}")
+                else:
+                    reply_text = generate_llm_reply(conversation, thread.get("employer_name", ""), cover_letter, resume_text)
+                send_now = CONFIG.llm_auto_send and (plan is None or bool(plan.get("auto")))
                 # LLM решил, что ответ не нужен (вежливость/уведомление без вопроса)
                 if reply_text and "[NO_REPLY]" in reply_text.upper():
                     state.llm_replied_msgs.add(key)
@@ -2139,7 +2158,7 @@ class BotManager:
 
                 ts = datetime.now().strftime("%d.%m %H:%M")
 
-                if CONFIG.llm_auto_send:
+                if send_now:
                     with self._llm_sent_lock:
                         if global_key in self._llm_sent_global:
                             log_debug(f"LLM [{state.short}] {neg_id}: другой поток уже отправил (pid={cur_pid}), пропуск")
@@ -2170,6 +2189,9 @@ class BotManager:
                                          llm_reply=reply_text, llm_sent=True)
                         self._add_log(state.short, state.color,
                             f"\U0001f916 Авто-ответ → {employer}: {reply_text[:60]}…", "success", neg_id=neg_id)
+                        if plan:
+                            notify_chat(employer, vacancy_title, employer_msg, plan, sent=True,
+                                        neg_id=neg_id, account=state.short)
                         self.llm_log.appendleft({
                             "time": ts, "acc": state.short, "color": state.color,
                             "employer": employer, "vacancy_title": vacancy_title,
@@ -2213,6 +2235,9 @@ class BotManager:
                                      llm_reply=reply_text, llm_sent=False)
                     self._add_log(state.short, state.color,
                         f"\U0001f916 Черновик в очередь [{employer}]: {reply_text[:80]}…", "info", neg_id=neg_id)
+                    if plan:
+                        notify_chat(employer, vacancy_title, employer_msg, plan, sent=False,
+                                    draft_id=draft_id, neg_id=neg_id, account=state.short)
                     self.llm_log.appendleft({
                         "time": ts, "acc": state.short, "color": state.color,
                         "employer": employer, "vacancy_title": vacancy_title,
@@ -2257,7 +2282,7 @@ class BotManager:
             try:
                 stats = fetch_hh_negotiations_stats(state.acc)
                 if stats.get("auth_error"):
-                    state.cookies_expired = True
+                    self._mark_cookies_expired(state)
                     self._add_log(
                         state.short, state.color,
                         "⚠️ Куки протухли! (HH stats) Обновите куки.", "error",

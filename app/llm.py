@@ -13,7 +13,42 @@ import threading
 from pathlib import Path
 
 from app.logging_utils import log_debug
-from app.config import CONFIG
+from app.config import CONFIG, DATA_DIR
+
+# Файлы владельца в data/ (в .gitignore): факты о кандидате и правила ответов в чатах
+PROFILE_FACTS_FILE = DATA_DIR / "profile_facts.md"
+CHAT_PLAYBOOK_FILE = DATA_DIR / "chat_playbook.md"
+_file_cache: dict = {}
+
+
+def _read_cached(path: Path) -> str:
+    """Текст файла без HTML-комментариев; перечитывается, когда меняется mtime."""
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return ""
+    hit = _file_cache.get(path)
+    if hit and hit[0] == mtime:
+        return hit[1]
+    text = re.sub(r"<!--[\s\S]*?-->", "", path.read_text(encoding="utf-8")).strip()
+    _file_cache[path] = (mtime, text)
+    return text
+
+
+def profile_facts() -> str:
+    return _read_cached(PROFILE_FACTS_FILE)
+
+
+def chat_playbook() -> str:
+    return _read_cached(CHAT_PLAYBOOK_FILE)
+
+
+def _facts_block() -> str:
+    facts = profile_facts()
+    if not facts:
+        return ""
+    return ("\n\n---\nФакты о кандидате (главный источник; важнее резюме при расхождении; "
+            "чего здесь и в резюме нет, того не придумывай):\n" + facts + "\n---")
 
 try:
     import openai as _openai_mod
@@ -155,9 +190,9 @@ def generate_llm_reply(conversation: list, employer_name: str = "", cover_letter
         )
     if cover_letter and cover_letter.strip():
         system += (
-            f"\n\nКонтекст: соискатель откликнулась на вакансию работодателя «{employer_name}» "
-            f"со следующим сопроводительным письмом:\n\"\"\"\n{cover_letter.strip()}\n\"\"\"\n"
-            "Учитывай содержание письма при ответе — не противоречь ему и будь последовательна."
+            f"\n\nКонтекст: к отклику на вакансию работодателя «{employer_name}» "
+            f"было приложено сопроводительное письмо:\n\"\"\"\n{cover_letter.strip()}\n\"\"\"\n"
+            "Учитывай содержание письма при ответе и не противоречь ему."
         )
     messages = [{"role": "system", "content": system}]
     for msg in conversation[-8:]:
@@ -213,6 +248,73 @@ def generate_llm_reply(conversation: list, employer_name: str = "", cover_letter
         return ""
 
 
+# Категории плейбука: в каких бот отвечает сам, а в каких только готовит черновик владельцу
+CHAT_AUTO_CATEGORIES = {"thanks", "experience", "salary_format", "contacts", "test_task", "interview_invite"}
+CHAT_CATEGORIES = CHAT_AUTO_CATEGORIES | {"offer", "negotiation", "rejection", "unknown", "no_reply"}
+CHAT_AUTO_MIN_CONFIDENCE = 0.7
+
+
+def generate_llm_reply_plan(conversation: list, employer_name: str = "", cover_letter: str = "",
+                            resume_text: str = "") -> dict:
+    """Ответ работодателю по плейбуку data/chat_playbook.md.
+
+    Возвращает {category, confidence, reply, variants, reason, auto}; auto=True — категория
+    из CHAT_AUTO_CATEGORIES и модель уверена, ответ можно отправить без владельца.
+    Пустой dict — сбой всех профилей.
+    """
+    playbook = chat_playbook()
+    system = CONFIG.llm_system_prompt
+    if playbook:
+        system += "\n\n---\nПлейбук ответов работодателям (следуй ему):\n" + playbook + "\n---"
+    if resume_text and resume_text.strip():
+        system += "\n\n---\nРезюме кандидата:\n" + resume_text.strip()[:6000] + "\n---"
+    system += _facts_block()
+    if cover_letter and cover_letter.strip():
+        system += (f"\n\nК отклику на вакансию работодателя «{employer_name}» было приложено письмо:\n"
+                   f"\"\"\"\n{cover_letter.strip()}\n\"\"\"\nНе противоречь ему.")
+    system += (
+        "\n\nВерни ТОЛЬКО JSON без markdown:\n"
+        '{"category": "<одна из: ' + ", ".join(sorted(CHAT_CATEGORIES)) + '>", '
+        '"confidence": <0..1, насколько ты уверен в категории и в том, что ответ верен по фактам>, '
+        '"reply": "<лучший ответ от первого лица; пусто, если category=no_reply>", '
+        '"variants": ["<другой вариант ответа>", "<ещё вариант>"], '
+        '"reason": "<коротко: почему такая категория>"}'
+    )
+    convo = []
+    for msg in conversation[-8:]:
+        who = "Работодатель" if msg.get("sender") == "employer" else "Кандидат"
+        convo.append(f"{who}: {msg.get('text', '')}")
+    user = "Переписка (последнее сообщение внизу):\n" + "\n".join(convo)
+    raw = _llm_chat([{"role": "system", "content": system}, {"role": "user", "content": user}],
+                    max_tokens=900, temperature=0.6, label="generate_llm_reply_plan")
+    if not raw:
+        return {}
+    m = re.search(r"\{[\s\S]*\}", raw)
+    plan = {}
+    if m:
+        try:
+            plan = json.loads(m.group())
+        except Exception:
+            plan = {}
+    if not plan:
+        # Модель вернула просто текст: черновик владельцу, без автоотправки
+        no_reply = "[NO_REPLY]" in raw.upper()
+        return {"category": "no_reply" if no_reply else "unknown", "confidence": 0.0,
+                "reply": "" if no_reply else raw, "variants": [], "reason": "ответ не в JSON", "auto": False}
+    cat = str(plan.get("category", "unknown")).strip().lower()
+    if cat not in CHAT_CATEGORIES:
+        cat = "unknown"
+    try:
+        conf = float(plan.get("confidence", 0))
+    except (TypeError, ValueError):
+        conf = 0.0
+    reply = _no_dash(str(plan.get("reply") or ""))
+    variants = [_no_dash(str(v)) for v in (plan.get("variants") or []) if str(v).strip()][:3]
+    return {"category": cat, "confidence": conf, "reply": reply, "variants": variants,
+            "reason": str(plan.get("reason") or "")[:300],
+            "auto": cat in CHAT_AUTO_CATEGORIES and conf >= CHAT_AUTO_MIN_CONFIDENCE and bool(reply)}
+
+
 def _llm_chat(messages: list, max_tokens: int = 300, temperature: float = 0.7, label: str = "llm") -> str:
     """Прогнать messages через сконфигурированные LLM-профили (fallback по порядку). Возвращает текст или ''."""
     if not _openai_available:
@@ -253,6 +355,7 @@ def generate_cover_letter(vacancy_title: str, vacancy_description: str, company:
             f"\n\n---\nРезюме соискателя (опирайся на факты отсюда, не выдумывай):\n"
             f"{resume_texts.strip()}\n---"
         )
+    system += _facts_block()
     user = f"Должность: {vacancy_title or '—'}\nКомпания: {company or '—'}\n"
     if vacancy_description and vacancy_description.strip():
         user += f"\nОписание вакансии:\n{vacancy_description.strip()[:3000]}\n"
@@ -298,8 +401,8 @@ def generate_llm_questionnaire_answers(rich_questions: list, vacancy_title: str 
             lines.append(f'{i}. [выпадающий список: {opts}] {qtext}')
     lines += [
         "",
-        "Заполни анкету от первого лица. Отвечай кратко и профессионально.",
-        "Для текста — 1–3 предложения.",
+        "Заполни анкету от первого лица по правилам из системного сообщения.",
+        "Для текста — 1–5 предложений, на вопрос на знания можно подробнее.",
         "Для radio/checkbox/select — верни точное value из скобок (цифру или код).",
         "",
         "Верни ТОЛЬКО JSON без пояснений:",
@@ -310,13 +413,22 @@ def generate_llm_questionnaire_answers(rich_questions: list, vacancy_title: str 
     lines.append("}")
 
     system = (
-        "Ты помогаешь заполнять анкеты при трудоустройстве. Отвечай правдиво на основе "
-        "резюме кандидата. На вопросы об опыте/навыках: если опыт есть — дай конкретику из "
-        "резюме; если прямого нет — кратко отметь близкий/смежный опыт, который пригодится, "
-        "ничего не выдумывая. Возвращай ТОЛЬКО валидный JSON, без markdown и пояснений."
+        "Ты заполняешь анкету работодателя от лица кандидата, от первого лица. Правила:\n"
+        "1. Вопрос об опыте, навыках, проектах — отвечай по фактам о кандидате и резюме, "
+        "с конкретикой (технологии, масштаб, результат). Ничего не выдумывай: ни лет опыта, "
+        "ни компаний, ни цифр.\n"
+        "2. Прямого опыта нет — честно скажи, что не работал с этим, и назови ближайший "
+        "смежный опыт из фактов.\n"
+        "3. Вопрос на знания (что делает команда, чем отличается A от B, как бы ты решил "
+        "задачу) — отвечай как опытный инженер: по существу, правильно, 2–5 предложений.\n"
+        "4. Зарплата, формат, город, релокация, выход на работу, английский — строго по фактам.\n"
+        "5. Варианты ответа — выбирай тот, что правдив для кандидата; не завышай уровень.\n"
+        "6. Без канцелярита, штампов и длинных тире.\n"
+        "Возвращай ТОЛЬКО валидный JSON, без markdown и пояснений."
     )
     if resume_text:
-        system += f"\n\nРезюме кандидата:\n{resume_text[:2000]}"
+        system += f"\n\nРезюме кандидата с hh:\n{resume_text[:6000]}"
+    system += _facts_block()
     messages = [{"role": "system", "content": system}, {"role": "user", "content": "\n".join(lines)}]
 
     for i, profile in enumerate(profiles):
@@ -326,7 +438,7 @@ def generate_llm_questionnaire_answers(rich_questions: list, vacancy_title: str 
         try:
             client = _client_for(profile)
             resp = client.chat.completions.create(
-                model=model, messages=messages, max_tokens=600, temperature=0.3,
+                model=model, messages=messages, max_tokens=2000, temperature=0.3,
             )
             raw = _no_dash(resp.choices[0].message.content)
             log_debug(f"generate_llm_questionnaire_answers raw: {raw[:300]}")

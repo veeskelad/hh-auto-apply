@@ -25,7 +25,8 @@ NOTIFY_DIR = Path("data/notifications")
 NOTIFY_DIR.mkdir(exist_ok=True, parents=True)
 
 
-def _write_notification(n_type: str, title: str, company: str, message: str, account: str = ""):
+def _write_notification(n_type: str, title: str, company: str, message: str, account: str = "",
+                        extra: dict = None):
     """Write a notification file. Hermes will pick it up and deliver to Telegram."""
     ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     filename = f"{ts}_{n_type}.json"
@@ -38,6 +39,8 @@ def _write_notification(n_type: str, title: str, company: str, message: str, acc
         "timestamp": datetime.now().isoformat(),
         "delivered": False,
     }
+    if extra:
+        data.update(extra)
     try:
         with open(NOTIFY_DIR / filename, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -76,3 +79,25 @@ def notify_daily_summary(sent: int, errors: int, interviews: int, account: str =
     _write_notification("daily_summary", "", "",
                         f"📊 Дневная сводка: {sent} откликов, {errors} ошибок, {interviews} приглашений",
                         account)
+
+
+def notify_chat(employer: str, vacancy_title: str, employer_msg: str, plan: dict, sent: bool,
+                draft_id: str = "", neg_id: str = "", account: str = ""):
+    """Сообщение работодателя: что бот ответил сам или какие варианты ждут владельца.
+
+    draft_id — ключ черновика в очереди дашборда: владелец выбирает вариант, Hermes
+    кладёт текст через /api/llm/pending/edit и отправляет через /api/llm/pending/send.
+    """
+    head = "💬 Ответил сам" if sent else "✋ Нужен твой ответ"
+    _write_notification("chat", vacancy_title, employer,
+                        f"{head}: {employer} — {vacancy_title}", account,
+                        extra={"employer_msg": employer_msg[:1500], "sent": sent,
+                               "category": plan.get("category", ""), "reason": plan.get("reason", ""),
+                               "reply": plan.get("reply", ""), "variants": plan.get("variants", []),
+                               "draft_id": draft_id, "neg_id": neg_id})
+
+
+def notify_auth_expired(account: str = ""):
+    """Куки hh протухли: владельцу нужно войти в ego и передать куки заново."""
+    _write_notification("error", "", "", "🔑 Вход в hh.ru протух, отклики стоят", account,
+                        extra={"subtype": "auth"})

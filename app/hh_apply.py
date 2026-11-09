@@ -8,6 +8,8 @@ import ssl
 import time
 import asyncio
 import threading
+from datetime import datetime
+from pathlib import Path
 import requests
 import aiohttp
 
@@ -227,6 +229,27 @@ async def send_response_async(acc: dict, vid: str) -> tuple:
         return "error", {"exception": str(e)}
 
 
+
+QUESTIONNAIRE_LOG = Path("data") / "questionnaire_log.jsonl"
+
+
+def log_questionnaire(vid: str, title: str, company: str, rich_qs: list, answers: dict,
+                      result: str, by_llm: bool = False) -> None:
+    """Записать пары «вопрос → ответ» анкеты в data/questionnaire_log.jsonl (для сводки владельцу)."""
+    try:
+        qa = []
+        for q in rich_qs or []:
+            val = str(answers.get(q.get("field"), ""))
+            labels = {o.get("value"): o.get("label") for o in q.get("options") or []}
+            qa.append({"q": q.get("text", ""), "a": labels.get(val, val)})
+        rec = {"at": datetime.now().isoformat(timespec="seconds"), "vacancy_id": vid,
+               "url": f"https://hh.ru/vacancy/{vid}", "title": title, "company": company,
+               "result": result, "by_llm": by_llm, "qa": qa}
+        with open(QUESTIONNAIRE_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception as e:
+        log_debug(f"log_questionnaire error: {e}")
+
 async def fill_and_submit_questionnaire(acc: dict, vid: str,
                                         vacancy_title: str = "", company: str = "") -> tuple:
     """
@@ -268,6 +291,7 @@ async def fill_and_submit_questionnaire(acc: dict, vid: str,
                 return "test", {}
 
             # LLM-заполнение опросника (если включено)
+            llm_used = False
             if CONFIG.llm_fill_questionnaire and CONFIG.llm_enabled and _openai_available and questions:
                 rich_qs = _parse_questionnaire_rich(html)
                 resume_text = ""
@@ -299,6 +323,7 @@ async def fill_and_submit_questionnaire(acc: dict, vid: str,
                     overridden = [f for f in validated_ans if f in field_answers]
                     for f in overridden:
                         field_answers[f] = validated_ans[f]
+                    llm_used = bool(overridden)
                     log_debug(f"Questionnaire {vid}: LLM заполнил {len(overridden)}/{len(field_answers)} полей: {overridden}")
                 else:
                     log_debug(f"Questionnaire {vid}: LLM вернул пустой ответ, используем шаблоны")
@@ -335,23 +360,27 @@ async def fill_and_submit_questionnaire(acc: dict, vid: str,
 
             log_debug(f"Questionnaire submit {vid}: HTTP {status} location={location}")
 
+            result = "test"
             if status in (302, 303):
                 if "negotiations-limit-exceeded" in location or "negotiations-limit-exceeded" in txt:
-                    return "limit", {}
+                    result = "limit"
                 # Редирект назад на форму — ошибка валидации
-                if "withoutTest=no" in location or f"vacancyId={vid}" in location:
+                elif "withoutTest=no" in location or f"vacancyId={vid}" in location:
                     log_debug(f"Questionnaire {vid}: form rejected, redirect back")
-                    return "test", {}
-                return "sent", {}
-
-            if status == 200:
+                    result = "test"
+                else:
+                    result = "sent"
+            elif status == 200:
                 if "negotiations-limit-exceeded" in txt:
-                    return "limit", {}
-                if "test-required" in txt:
-                    return "test", {}
-                return "sent", {}
+                    result = "limit"
+                elif "test-required" in txt:
+                    result = "test"
+                else:
+                    result = "sent"
 
-            return "test", {}
+            log_questionnaire(vid, vacancy_title, company, _parse_questionnaire_rich(html),
+                              field_answers, result, by_llm=bool(llm_used))
+            return result, {}
 
     except Exception as e:
         log_debug(f"fill_and_submit_questionnaire error: {e}")

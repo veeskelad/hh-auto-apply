@@ -197,8 +197,13 @@ async def api_session_add(body: dict):
             if letter:
                 ts["letter"] = letter
             if i in bot.temp_states:
-                bot.temp_states[i].acc["cookies"] = auth_cookies
-                bot.temp_states[i].acc["all_resumes"] = all_resumes
+                st = bot.temp_states[i]
+                st.acc["cookies"] = auth_cookies
+                st.acc["all_resumes"] = all_resumes
+                # Пауза стояла из-за протухших кук — со свежими куками снимаем её
+                if st.cookies_expired:
+                    st.cookies_expired = False
+                    st.paused = False
                 if letter:
                     bot.temp_states[i].acc["letter"] = letter
             save_browser_sessions(bot.temp_sessions)
