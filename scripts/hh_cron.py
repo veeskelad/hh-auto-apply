@@ -17,6 +17,8 @@ import os
 import sys
 import time
 import urllib.request
+from datetime import datetime
+from pathlib import Path
 
 BASE = os.environ.get("HH_API_BASE", "http://127.0.0.1:8000")
 
@@ -66,6 +68,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("names", nargs="+")
     ap.add_argument("--max-hours", type=float, default=3.0, help="на каждую кампанию")
+    ap.add_argument("--notify", action="store_true", help="проблему записать уведомлением в data/notifications")
     a = ap.parse_args()
     try:
         camps = http("GET", "/api/campaigns")
@@ -88,7 +91,16 @@ def main() -> int:
             problems.append(why)
             if "вход" in why or "лимит откликов аккаунта" in why:
                 break
-    print("⚠️ hh: " + "; ".join(problems) if problems else "[SILENT]")
+    msg = "⚠️ hh: " + "; ".join(problems) if problems else "[SILENT]"
+    print(msg)
+    if problems and a.notify:
+        # Запуск в фоне: вывод никто не читает, поэтому проблема уходит уведомлением
+        d = Path(__file__).resolve().parent.parent / "data" / "notifications"
+        d.mkdir(parents=True, exist_ok=True)
+        now = datetime.now()
+        (d / f"{now:%Y%m%d_%H%M%S_%f}_error.json").write_text(json.dumps({
+            "type": "error", "title": "", "company": "", "message": msg, "account": "",
+            "timestamp": now.isoformat(), "delivered": False}, ensure_ascii=False), encoding="utf-8")
     return 1 if problems else 0
 
 
