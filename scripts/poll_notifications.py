@@ -30,6 +30,16 @@ def _quote(text: str, limit: int = 400) -> str:
     return "> " + (one[:limit] + "…" if len(one) > limit else one)
 
 
+def _reply_bot_alive() -> bool:
+    """Отдельный бот для ответов жив — черновики идут туда, а не в Hermes."""
+    try:
+        import time
+        st = json.loads((NOTIFY_DIR.parent / "reply_bot_state.json").read_text(encoding="utf-8"))
+        return time.time() - float(st.get("alive_at", 0)) < 300
+    except Exception:
+        return False
+
+
 def _chat_block(n: dict) -> list:
     draft = n.get("draft_id", "")
     head = "💬 Ответил сам" if n.get("sent") else "✋ Нужен твой ответ"
@@ -74,7 +84,10 @@ def poll(mark: bool = True) -> str:
         lines.append(f"🎯 **Приглашение**: {n.get('message', '')}")
     if lines:
         lines.append("")
+    bot_alive = _reply_bot_alive()
     for n in by.pop("chat", []):
+        if bot_alive and not n.get("sent"):
+            continue  # черновик ушёл карточкой в отдельный бот (hh_reply_bot.py)
         lines += _chat_block(n)
     auth = [n for n in by.get("error", []) if n.get("subtype") == "auth"]
     if auth:

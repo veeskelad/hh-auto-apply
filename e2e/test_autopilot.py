@@ -303,3 +303,70 @@ def test_web_apply_result(monkeypatch, status, body, want):
     assert res == want
     if want == "sent":
         assert info["title"] == "SRE" and info["company"] == "Acme"
+
+
+def test_poll_skips_drafts_when_reply_bot_alive(tmp_path, monkeypatch):
+    import time
+    poll_notifications, _ = _scripts()
+    nd = tmp_path / "notifications"
+    nd.mkdir()
+    monkeypatch.setattr(notify, "NOTIFY_DIR", nd)
+    monkeypatch.setattr(poll_notifications, "NOTIFY_DIR", nd)
+    notify.notify_chat("Acme", "SRE", "Когда созвонимся?", {"category": "unknown", "reply": "Завтра"},
+                       sent=False, draft_id="acc:1")
+    notify.notify_chat("Beta", "DevOps", "Спасибо!", {"category": "thanks", "reply": "И вам"}, sent=True)
+    (tmp_path / "reply_bot_state.json").write_text(json.dumps({"alive_at": time.time()}))
+    text = poll_notifications.poll()
+    assert "Acme" not in text and "Beta" in text
+
+
+def test_reply_bot_card():
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    import hh_reply_bot as b
+    n = {"company": "A&B", "title": "SRE", "employer_msg": "Когда <удобно>?", "reply": "Завтра",
+         "variants": ["Чт"], "reason": "нет окон"}
+    t = b.card_text(n)
+    assert "A&amp;B" in t and "&lt;удобно&gt;" in t and "<b>1.</b> Завтра" in t and "<b>2.</b> Чт" in t
+    kb = b.card_keyboard("7", 2)["inline_keyboard"]
+    assert [x["callback_data"] for x in kb[0]] == ["pick:7:1", "pick:7:2"]
+    assert kb[1][0]["callback_data"] == "own:7" and kb[1][1]["callback_data"] == "skip:7"
+
+
+def test_reply_bot_flow(tmp_path, monkeypatch):
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    import hh_reply_bot as b
+    nd = tmp_path / "notifications"
+    nd.mkdir()
+    monkeypatch.setattr(b, "NOTIFY_DIR", nd)
+    monkeypatch.setattr(b, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(notify, "NOTIFY_DIR", nd)
+    notify.notify_chat("Acme", "SRE", "Когда созвонимся?", {"category": "unknown", "reply": "Завтра в 12",
+                       "variants": ["Чт после 15"]}, sent=False, draft_id="acc:1")
+    calls, sent = [], []
+
+    class FakeTG:
+        def call(self, method, **p):
+            calls.append((method, p))
+            return {"message_id": 100 + len(calls)}
+
+    def fake_api(method, path, body=None):
+        if path == "/api/llm/pending":
+            return {"pending": [{"draft_id": "acc:1"}]}
+        if path.endswith("/edit"):
+            sent.append(body["text"])
+            return {"ok": True}
+        if path.endswith("/send"):
+            return {"sent": 1}
+        return {"removed": 1}
+    monkeypatch.setattr(b, "api", fake_api)
+    tg, st = FakeTG(), b.load_state()
+    b.new_cards(tg, 1, st)
+    assert calls[0][0] == "sendMessage" and "Завтра в 12" in calls[0][1]["text"]
+    b.new_cards(tg, 1, st)
+    assert len([c for c in calls if c[0] == "sendMessage"]) == 1  # повторно не шлёт
+    b.on_callback(tg, 1, st, {"id": "q", "data": "pick:1:2"})
+    assert "Отправить вариант 2?" in calls[-2][1]["text"] and sent == []
+    b.on_callback(tg, 1, st, {"id": "q", "data": "send:1"})
+    assert sent == ["Чт после 15"] and st["cards"]["1"]["status"] == "sent"
+    b.on_callback(tg, 1, st, {"id": "q", "data": "send:1"})
+    assert sent == ["Чт после 15"]  # закрытую карточку второй раз не отправить
