@@ -56,6 +56,8 @@ def run_campaign(cid: str, name: str, deadline: float) -> str:
             if a.get("cookies_expired"):
                 return "вход в hh.ru протух"
             detail = str(a.get("status_detail", ""))
+            if a.get("status") == "captcha":
+                return "hh просит капчу"
             if a.get("status") == "limit" or detail.startswith("Кампания завершена"):
                 return ""
             if "лимит hh" in detail.lower() or "negotiations-limit" in detail:
@@ -89,7 +91,7 @@ def main() -> int:
             pass
         if why:
             problems.append(why)
-            if "вход" in why or "лимит откликов аккаунта" in why:
+            if "вход" in why or "лимит откликов аккаунта" in why or "капч" in why:
                 break
     msg = "⚠️ hh: " + "; ".join(problems) if problems else "[SILENT]"
     print(msg)

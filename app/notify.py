@@ -97,6 +97,12 @@ def notify_chat(employer: str, vacancy_title: str, employer_msg: str, plan: dict
                                "draft_id": draft_id, "neg_id": neg_id})
 
 
+def notify_captcha(account: str = "", url: str = ""):
+    """hh требует капчу на отклики через API: владелец решает её по ссылке в браузере, где вошёл в hh."""
+    _write_notification("error", "", "", "🧩 hh просит капчу, отклики стоят", account,
+                        extra={"subtype": "captcha", "captcha_url": url})
+
+
 def notify_auth_expired(account: str = ""):
     """Куки hh протухли: владельцу нужно войти в ego и передать куки заново."""
     _write_notification("error", "", "", "🔑 Вход в hh.ru протух, отклики стоят", account,

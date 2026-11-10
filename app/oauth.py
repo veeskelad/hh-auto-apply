@@ -165,6 +165,16 @@ def _oauth_apply(acc: dict, vid: str, message: str = "") -> tuple:
         elif r.status_code in (401, 403):
             # Причину пишем в лог: «протухший токен», капча и запрет на отклик выглядят одинаково по коду
             log_debug(f"OAuth apply {vid}: HTTP {r.status_code} {r.text[:300]}")
+            try:
+                errs = r.json().get("errors") or []
+            except Exception:
+                errs = []
+            cap = next((e for e in errs if e.get("value") == "captcha_required"), None)
+            if cap:
+                url = cap.get("captcha_url", "")
+                if url:
+                    url += ("&" if "?" in url else "?") + "backurl=https%3A%2F%2Fhh.ru%2F"
+                return "captcha", {"captcha_url": url}
             return "auth_error", {"raw": r.text[:200]}
         elif r.status_code == 404:
             return "error", {"raw": "Вакансия не найдена"}

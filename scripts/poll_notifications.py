@@ -11,6 +11,7 @@
 """
 
 import json
+import re
 import os
 import sys
 from pathlib import Path
@@ -19,23 +20,32 @@ ROOT = Path(__file__).resolve().parent.parent
 NOTIFY_DIR = Path(os.environ.get("HH_NOTIFY_DIR", ROOT / "data" / "notifications"))
 
 
+_GREETING = re.compile(r"^\s*([А-ЯЁA-Z][\w-]+,\s*)?(добрый\s+(день|вечер)|здравствуйте|привет)\w*[!,.]?\s*", re.I)
+
+
+def _quote(text: str, limit: int = 400) -> str:
+    """Сообщение работодателя одной строкой цитаты: Telegram цитирует строку с «>», а переносы рвут цитату."""
+    one = re.sub(r"\s+", " ", (text or "")).strip()
+    one = _GREETING.sub("", one) or one
+    return "> " + (one[:limit] + "…" if len(one) > limit else one)
+
+
 def _chat_block(n: dict) -> list:
+    draft = n.get("draft_id", "")
     head = "💬 Ответил сам" if n.get("sent") else "✋ Нужен твой ответ"
-    lines = [f"**{head}** — {n.get('company', '')}, {n.get('title', '')}",
-             f"> {(n.get('employer_msg') or '').strip()[:600]}"]
+    lines = [f"**{head}** — {n.get('company', '')}, {n.get('title', '')}", _quote(n.get("employer_msg"))]
     if n.get("sent"):
-        lines.append(f"Отправлено: {n.get('reply', '')}")
-        if n.get("variants"):
-            lines.append("Другие варианты (на будущее): " + " | ".join(n["variants"]))
-    else:
-        opts = [n.get("reply", "")] + list(n.get("variants") or [])
-        for i, v in enumerate([o for o in opts if o], 1):
-            lines.append(f"{i}. {v}")
-        if n.get("reason"):
-            lines.append(f"_Почему не ответил сам: {n['reason']}_")
-        lines.append(f"Ответ: `hh reply {n.get('draft_id', '')} <номер или свой текст>` · "
-                     f"пропустить: `hh skip {n.get('draft_id', '')}`")
-    return lines + [""]
+        lines.append(f"**Отправил:** {n.get('reply', '')}")
+        return lines + [""]
+    opts = [o for o in [n.get("reply", "")] + list(n.get("variants") or []) if o]
+    if opts:
+        lines.append("**Варианты:**")
+        lines += [f"{i}. {v}" for i, v in enumerate(opts, 1)]
+    if n.get("reason"):
+        lines.append(f"💭 {n['reason']}")
+    lines += [f"`hh reply {draft} 1` — отправить вариант 1 (вместо номера можно свой текст)",
+              f"`hh skip {draft}` — не отвечать", ""]
+    return lines
 
 
 def poll(mark: bool = True) -> str:
@@ -71,7 +81,13 @@ def poll(mark: bool = True) -> str:
         cmd = os.environ.get("HH_LOGIN_CMD", "python3 scripts/ego_login.py --target <сервер>")
         lines += ["🔑 **Вход в hh.ru протух.** Войди в hh.ru в ego lite на компьютере и выполни:",
                   f"`{cmd}`", ""]
-    errors = [n for n in by.pop("error", []) if n.get("subtype") != "auth"]
+    captcha = [n for n in by.get("error", []) if n.get("subtype") == "captcha"]
+    if captcha:
+        url = captcha[-1].get("captcha_url", "")
+        lines += ["🧩 **hh просит капчу на отклики, бот стоит.** Открой ссылку в браузере, где вошёл в hh, "
+                  "реши капчу. Кампании продолжат при следующем запуске по расписанию.",
+                  url or "(ссылки нет, открой hh.ru)", ""]
+    errors = [n for n in by.pop("error", []) if n.get("subtype") not in ("auth", "captcha")]
     if errors:
         lines.append(f"⚠️ Ошибки откликов: {len(errors)}")
         lines += [f"- {n.get('message', '')}" for n in errors[:3]]

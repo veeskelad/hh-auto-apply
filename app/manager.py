@@ -40,7 +40,8 @@ from app.hh_api import (
 )
 
 from app.llm import generate_llm_reply, generate_llm_reply_plan, chat_playbook
-from app.notify import notify_interview, notify_response, notify_error, notify_chat, notify_auth_expired
+from app.notify import (notify_interview, notify_response, notify_error, notify_chat, notify_auth_expired,
+                        notify_captcha)
 
 from app.hh_apply import (
     _resolve_letter,
@@ -481,6 +482,7 @@ class BotManager:
         state.hard_stopped = False
         state.limit_exceeded = False
         state.limit_reset_time = None
+        state.captcha_notified = False
         state._needs_applied_sync = True
         state.armed = True
         state.status = "idle"
@@ -510,7 +512,9 @@ class BotManager:
         if not text:
             return False
         low = text.lower()
-        if any(m in low for m in LLM_QUESTION_MARKERS):
+        # «не готовы пригласить», «не готовы предложить» — отказ, а не вопрос «готовы ли вы»
+        probe = re.sub(r"не\s+готов\w*", " ", low)
+        if any(m in probe for m in LLM_QUESTION_MARKERS):
             return False
         patterns = CONFIG.llm_skip_patterns or DEFAULT_LLM_SKIP_PATTERNS
         for pat in patterns:
@@ -1682,6 +1686,21 @@ class BotManager:
                             )
                         break
 
+                    elif result == "captcha":
+                        # hh просит капчу на отклики через API: дальше все отклики упадут так же.
+                        # Решает человек по ссылке (обходить нельзя), бот стоит до снятия паузы.
+                        url = (info or {}).get("captcha_url", "")
+                        state.paused = True
+                        state.status = "captcha"
+                        state.status_detail = "🧩 hh просит капчу на отклики"
+                        self._add_log(state.short, state.color,
+                                      "🧩 hh просит капчу на отклики. Реши её по ссылке и сними паузу.", "error")
+                        self._add_acc_event(state, "🧩", "error", "Капча", "", "hh просит капчу")
+                        if not getattr(state, "captcha_notified", False):
+                            notify_captcha(state.short, url)
+                            state.captcha_notified = True
+                        break
+
                     elif result == "auth_error":
                         if state.use_oauth or CONFIG.use_oauth_apply:
                             # OAuth mode — don't stop, just log warning
@@ -2132,7 +2151,8 @@ class BotManager:
                 plan = None
                 if chat_playbook():
                     plan = generate_llm_reply_plan(conversation, thread.get("employer_name", ""), cover_letter, resume_text)
-                    if plan.get("category") == "no_reply":
+                    # Отказ и «свяжемся, если…» ответа не ждут: не отвечаем и не дёргаем владельца
+                    if plan.get("category") in ("no_reply", "rejection"):
                         reply_text = "[NO_REPLY]"
                     else:
                         reply_text = plan.get("reply", "") if plan else ""

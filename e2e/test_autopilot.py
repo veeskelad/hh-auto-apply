@@ -254,3 +254,27 @@ def test_rebind_campaigns_on_new_browser(monkeypatch):
     n = sessions._rebind_campaigns({"hhuid": "old-uid"}, {"hhuid": "new-uid", "hhtoken": "t"})
     assert n == 1 and saved == [{"id": "a", "session_key": "new-uid"}]
     assert sessions._rebind_campaigns({"hhuid": "new-uid"}, {"hhuid": "new-uid"}) == 0
+
+
+@pytest.mark.parametrize("text, skip", [
+    ("Дмитрий, здравствуйте! Большое спасибо за интерес к нашей компании! К сожалению, сейчас мы не готовы "
+     "пригласить вас на следующий этап. Ценим ваше внимание и будем рады взаимодействию в будущем.", True),
+    ("Спасибо за интерес к компании! Мы ценим ваше желание работать с нами, но уже закрыли позицию. "
+     "Возможно, скоро снова появится подходящая для вас позиция. Успехов!", True),
+    ("Спасибо за отклик! Мы с вами свяжемся.", True),
+    ("Спасибо за отклик! Готовы ли вы выйти в офис?", False),
+    ("Когда вам удобно созвониться?", False),
+])
+def test_no_reply_filter(text, skip):
+    from app.manager import BotManager
+    assert BotManager._msg_needs_no_reply(None, text) is skip
+
+
+def test_poll_captcha(tmp_path, monkeypatch):
+    poll_notifications, _ = _scripts()
+    monkeypatch.setattr(notify, "NOTIFY_DIR", tmp_path)
+    monkeypatch.setattr(poll_notifications, "NOTIFY_DIR", tmp_path)
+    notify.notify_captcha("acc", "https://hh.ru/account/captcha?state=x&backurl=https%3A%2F%2Fhh.ru%2F")
+    text = poll_notifications.poll()
+    assert "капчу" in text and "account/captcha?state=x" in text
+    assert "Ошибки откликов" not in text
