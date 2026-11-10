@@ -40,6 +40,7 @@ from app.hh_api import (
 )
 
 from app.llm import generate_llm_reply, generate_llm_reply_plan, chat_playbook
+from app.hh_transport import proxy_alive
 from app.notify import (notify_interview, notify_response, notify_error, notify_chat, notify_auth_expired,
                         notify_captcha)
 
@@ -70,14 +71,17 @@ from app.state import AccountState
 
 # -- Async page fetcher (used only by BotManager) --
 
-async def fetch_page(session, url, sem):
+async def fetch_page(auth, url, sem):
+    """Страница поиска hh. auth = (headers, cookies). Через requests: на *.hh.ru его подменяет
+    curl_cffi с TLS Chrome и прокси HH_PROXY (app/hh_transport); aiohttp шёл мимо и напрямую."""
+    headers, cookies = auth
     async with sem:
         try:
-            await asyncio.sleep(0.05)
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as r:
-                html = await r.text()
-                log_debug(f"✅ URL: {url} | Статус: {r.status} | Размер: {len(html)}")
-                return html
+            await asyncio.sleep(random.uniform(0.4, 1.2))  # не залпом: залп из 120 страниц выдал бота
+            r = await asyncio.to_thread(requests.get, url, headers=headers, cookies=cookies, timeout=25)
+            html = r.text
+            log_debug(f"✅ URL: {url} | Статус: {r.status_code} | Размер: {len(html)}")
+            return html
         except Exception as e:
             log_debug(f"❌ ОШИБКА при загрузке: {url} | {type(e).__name__}: {e}")
             return ""
@@ -1241,6 +1245,13 @@ class BotManager:
                 time.sleep(120)
                 continue
 
+            # Тоннель с Мака лежит (Мак спит): ждём, в hh напрямую с адреса дата-центра не ходим
+            if not proxy_alive():
+                state.status = "waiting"
+                state.status_detail = "⏳ Ждёт тоннель с Мака"
+                time.sleep(60)
+                continue
+
             # ── Эффективные настройки кампании: acc-override → глобальный CONFIG ──
             eff_min_salary = _as_int(acc.get("salary_from")) or CONFIG.min_salary
             eff_salary_only = bool(acc.get("salary_only"))
@@ -1778,7 +1789,7 @@ class BotManager:
         if not xsrf:
             return {}, {}, {}
         headers = get_headers(xsrf)
-        sem = asyncio.Semaphore(CONFIG.max_concurrent * 3)
+        sem = asyncio.Semaphore(max(1, min(CONFIG.max_concurrent, 3)))
 
         ssl_context = ssl.create_default_context()
         ssl_context.check_hostname = False
@@ -1816,7 +1827,7 @@ class BotManager:
         ) as session:
             async def fetch_one(url_idx, url, page, page_url):
                 nonlocal completed
-                html = await fetch_page(session, page_url, sem)
+                html = await fetch_page((headers, acc["cookies"]), page_url, sem)
                 completed += 1
                 state.current_url_idx = url_idx
                 state.current_url = url

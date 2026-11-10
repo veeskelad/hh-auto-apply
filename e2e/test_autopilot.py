@@ -370,3 +370,23 @@ def test_reply_bot_flow(tmp_path, monkeypatch):
     assert sent == ["Чт после 15"] and st["cards"]["1"]["status"] == "sent"
     b.on_callback(tg, 1, st, {"id": "q", "data": "send:1"})
     assert sent == ["Чт после 15"]  # закрытую карточку второй раз не отправить
+
+
+def test_hh_proxy_routing(monkeypatch):
+    from app import hh_transport as t
+    monkeypatch.delenv("HH_PROXY", raising=False)
+    assert t.proxy_alive() is True
+    monkeypatch.setenv("HH_PROXY", "socks5h://127.0.0.1:9")  # порт 9 никто не слушает
+    assert t.proxy_alive(timeout=0.5) is False
+    seen = {}
+
+    class Resp:
+        cookies = {}
+    monkeypatch.setattr(t.cffi, "request", lambda m, u, **kw: seen.update(kw) or Resp())
+    orig = t.requests.Session.request
+    try:
+        t.install()
+        t.requests.get("https://hh.ru/search/vacancy")
+        assert seen["proxies"] == {"http": "socks5h://127.0.0.1:9", "https": "socks5h://127.0.0.1:9"}
+    finally:
+        t.requests.Session.request = orig

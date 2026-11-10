@@ -5,6 +5,8 @@ install() подменяет requests.Session.request: всё, что идёт �
 через curl_cffi, остальные хосты (LLM, Telegram) — обычным requests.
 Сессия curl_cffi создаётся на каждый запрос, чтобы куки аккаунтов не смешивались.
 """
+import os
+import socket
 from urllib.parse import urlsplit
 
 import requests
@@ -13,6 +15,26 @@ from curl_cffi import requests as cffi
 
 _PASS = ("params", "data", "json", "timeout", "allow_redirects", "proxies", "verify", "auth", "stream")
 _DEFAULT_HEADERS = dict(requests.utils.default_headers())
+
+
+def hh_proxy() -> str:
+    """HH_PROXY (например socks5h://127.0.0.1:18080 — тоннель с Мака): весь трафик к hh только
+    через него. Не задан — напрямую. Задан, но не отвечает — запрос падает, напрямую не идём:
+    адрес дата-центра hh считает ботом и требует капчу."""
+    return os.environ.get("HH_PROXY", "").strip()
+
+
+def proxy_alive(timeout: float = 3.0) -> bool:
+    """Прокси HH_PROXY принимает соединения (тоннель с Мака поднят). Без HH_PROXY — True."""
+    p = hh_proxy()
+    if not p:
+        return True
+    u = urlsplit(p)
+    try:
+        with socket.create_connection((u.hostname or "127.0.0.1", u.port or 1080), timeout=timeout):
+            return True
+    except OSError:
+        return False
 
 
 def _is_hh(url: str) -> bool:
@@ -45,6 +67,8 @@ def install() -> None:
         headers = {**base, **(kw.get("headers") or {})}
         cookies = {**self.cookies.get_dict(), **(kw.get("cookies") or {})}
         extra = {k: kw[k] for k in _PASS if kw.get(k) is not None}
+        if hh_proxy():
+            extra["proxies"] = {"http": hh_proxy(), "https": hh_proxy()}
         files = kw.get("files")
         mime = _mime(files) if files else None
         try:

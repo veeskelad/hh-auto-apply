@@ -72,6 +72,15 @@ def main() -> int:
     ap.add_argument("--max-hours", type=float, default=3.0, help="на каждую кампанию")
     ap.add_argument("--notify", action="store_true", help="проблему записать уведомлением в data/notifications")
     a = ap.parse_args()
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from app.hh_transport import proxy_alive
+    _load_env()
+    if not proxy_alive():
+        msg = "⏳ hh: тоннель с Мака не поднят (Мак спит или без сети), кампании сегодня не стартовали"
+        print(msg)
+        if a.notify:
+            _notify(msg)
+        return 1
     try:
         camps = http("GET", "/api/campaigns")
     except Exception as e:
@@ -96,14 +105,28 @@ def main() -> int:
     msg = "⚠️ hh: " + "; ".join(problems) if problems else "[SILENT]"
     print(msg)
     if problems and a.notify:
-        # Запуск в фоне: вывод никто не читает, поэтому проблема уходит уведомлением
-        d = Path(__file__).resolve().parent.parent / "data" / "notifications"
-        d.mkdir(parents=True, exist_ok=True)
-        now = datetime.now()
-        (d / f"{now:%Y%m%d_%H%M%S_%f}_error.json").write_text(json.dumps({
-            "type": "error", "title": "", "company": "", "message": msg, "account": "",
-            "timestamp": now.isoformat(), "delivered": False}, ensure_ascii=False), encoding="utf-8")
+        _notify(msg)
     return 1 if problems else 0
+
+
+def _notify(msg: str) -> None:
+    """Запуск в фоне: вывод никто не читает, поэтому проблема уходит уведомлением."""
+    d = Path(__file__).resolve().parent.parent / "data" / "notifications"
+    d.mkdir(parents=True, exist_ok=True)
+    now = datetime.now()
+    (d / f"{now:%Y%m%d_%H%M%S_%f}_error.json").write_text(json.dumps({
+        "type": "error", "title": "", "company": "", "message": msg, "account": "",
+        "timestamp": now.isoformat(), "delivered": False}, ensure_ascii=False), encoding="utf-8")
+
+
+def _load_env() -> None:
+    """HH_PROXY и прочее из .env проекта (cron не наследует окружение службы)."""
+    env = Path(__file__).resolve().parent.parent / ".env"
+    if env.exists():
+        for line in env.read_text(encoding="utf-8").splitlines():
+            if "=" in line and not line.lstrip().startswith("#"):
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
 
 if __name__ == "__main__":
