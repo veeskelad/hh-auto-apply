@@ -9,7 +9,7 @@ import requests
 from fastapi import APIRouter, Request
 
 from app.config import accounts_data
-from app.storage import save_browser_sessions
+from app.storage import list_campaigns, save_browser_sessions, upsert_campaign
 from app.hh_resume import parse_hh_lux_ssr, _hh_ssr_str
 from app.instances import bot
 
@@ -138,6 +138,27 @@ def _same_hh_account(new_cookies: dict, new_all_resumes: list, ts: dict) -> bool
     return bool(new_hashes & ts_hashes)
 
 
+_SESSION_KEY_COOKIES = ("hhuid", "crypted_hhuid", "iap.uid")
+
+
+def _rebind_campaigns(old_cookies: dict, new_cookies: dict) -> int:
+    """Кампания привязана к сессии по куке hhuid (bot.idx_for_session_key). Вход из другого
+    браузера (ego lite) приносит другой hhuid, и кампании того же аккаунта переставали
+    находить сессию. Перепривязываем их к новому ключу. Возвращает число кампаний."""
+    old = {old_cookies.get(k) for k in _SESSION_KEY_COOKIES} - {None, ""}
+    new_vals = {new_cookies.get(k) for k in _SESSION_KEY_COOKIES} - {None, ""}
+    new_key = next((new_cookies.get(k) for k in _SESSION_KEY_COOKIES if new_cookies.get(k)), "")
+    if not old or not new_key:
+        return 0
+    n = 0
+    for camp in list_campaigns():
+        key = camp.get("session_key")
+        if key in old and key not in new_vals:
+            upsert_campaign({"id": camp["id"], "session_key": new_key})
+            n += 1
+    return n
+
+
 @router.post("/api/session/add")
 async def api_session_add(body: dict):
     """Добавить временную сессию из браузера по строке cookies."""
@@ -184,6 +205,7 @@ async def api_session_add(body: dict):
     # куки того же аккаунта обновляет существующую сессию, а не плодит дубликаты.
     for i, ts in enumerate(bot.temp_sessions):
         if _same_hh_account(auth_cookies, all_resumes, ts):
+            _rebind_campaigns(ts.get("cookies") or {}, auth_cookies)
             ts["name"] = display_name
             ts["short"] = display_name.split()[0] if display_name.split() else display_name
             ts["all_resumes"] = all_resumes

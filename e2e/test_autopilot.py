@@ -243,3 +243,14 @@ def test_questionnaire_prompt_open_variant(files, monkeypatch):
     assert ans == {"task_1": "open", "task_1_text": "Штат, затем самозанятость"}
     user = seen["messages"][1]["content"]
     assert 'value=open, а текст в поле "task_1_text"' in user and '"task_1_text": ""' in user
+
+
+def test_rebind_campaigns_on_new_browser(monkeypatch):
+    from app.routes import sessions
+    camps = [{"id": "a", "session_key": "old-uid"}, {"id": "b", "session_key": "other"}]
+    saved = []
+    monkeypatch.setattr(sessions, "list_campaigns", lambda: camps)
+    monkeypatch.setattr(sessions, "upsert_campaign", lambda c: saved.append(c) or c)
+    n = sessions._rebind_campaigns({"hhuid": "old-uid"}, {"hhuid": "new-uid", "hhtoken": "t"})
+    assert n == 1 and saved == [{"id": "a", "session_key": "new-uid"}]
+    assert sessions._rebind_campaigns({"hhuid": "new-uid"}, {"hhuid": "new-uid"}) == 0
