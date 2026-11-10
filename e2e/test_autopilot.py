@@ -398,3 +398,19 @@ def test_keep_antibot_cookies():
         assert _keep_cookie(name), name
     for name in ("_ym_uid", "tmr_lvid", "filters77161675", "device_breakpoint"):
         assert not _keep_cookie(name), name
+
+
+def test_cron_captcha_cooldown(tmp_path, monkeypatch):
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    import hh_cron
+    from datetime import datetime, timedelta
+    nd = tmp_path / "data" / "notifications"
+    nd.mkdir(parents=True)
+    monkeypatch.setattr(hh_cron, "__file__", str(tmp_path / "scripts" / "hh_cron.py"))
+    assert hh_cron.captcha_cooldown() == ""
+    ts = (datetime.now() - timedelta(hours=2)).isoformat()
+    (nd / "a_error.json").write_text(json.dumps({"type": "error", "subtype": "captcha", "timestamp": ts}))
+    assert hh_cron.captcha_cooldown() != ""
+    ts = (datetime.now() - timedelta(hours=25)).isoformat()
+    (nd / "a_error.json").write_text(json.dumps({"type": "error", "subtype": "captcha", "timestamp": ts}))
+    assert hh_cron.captcha_cooldown() == ""

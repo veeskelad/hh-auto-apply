@@ -75,6 +75,10 @@ def main() -> int:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from app.hh_transport import proxy_alive
     _load_env()
+    cool = captcha_cooldown()
+    if cool:
+        print(f"⏳ hh: капча была {cool}, кампании сегодня не стартуют (пауза 20 ч)")
+        return 0
     if not proxy_alive():
         msg = "⏳ hh: тоннель с Мака не поднят (Мак спит или без сети), кампании сегодня не стартовали"
         print(msg)
@@ -107,6 +111,24 @@ def main() -> int:
     if problems and a.notify:
         _notify(msg)
     return 1 if problems else 0
+
+
+def captcha_cooldown(hours: float = 20) -> str:
+    """Время последней капчи, если она была меньше hours часов назад, иначе ''.
+    10.11: повторные запуски после капчи только продлевали флаг isBot на аккаунте."""
+    d = Path(__file__).resolve().parent.parent / "data" / "notifications"
+    last = None
+    for f in d.glob("*_error.json") if d.exists() else []:
+        try:
+            n = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if n.get("subtype") == "captcha":
+            ts = datetime.fromisoformat(n.get("timestamp", "1970-01-01"))
+            last = ts if last is None or ts > last else last
+    if last and (datetime.now() - last).total_seconds() < hours * 3600:
+        return last.strftime("%d.%m %H:%M")
+    return ""
 
 
 def _notify(msg: str) -> None:
