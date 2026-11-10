@@ -390,3 +390,11 @@ def test_hh_proxy_routing(monkeypatch):
         assert seen["proxies"] == {"http": "socks5h://127.0.0.1:9", "https": "socks5h://127.0.0.1:9"}
     finally:
         t.requests.Session.request = orig
+
+
+def test_keep_antibot_cookies():
+    from app.routes.accounts import _keep_cookie
+    for name in ("hhtoken", "_xsrf", "__ddg1_", "__ddg10_", "gsscgib-w-hh", "cfidsgib-w-hh", "__zzatgib-w-hh"):
+        assert _keep_cookie(name), name
+    for name in ("_ym_uid", "tmr_lvid", "filters77161675", "device_breakpoint"):
+        assert not _keep_cookie(name), name

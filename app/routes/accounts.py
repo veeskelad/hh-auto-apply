@@ -49,6 +49,15 @@ _AUTH_COOKIE_KEYS = {
 }
 
 
+# Антибот hh: DDoS-Guard (__ddg*) и антифрод Group-IB (*gib-w-hh, __zzat*). После решённой капчи
+# «пропуск» лежит в них: без этих кук бот получал hhcaptcha isBot даже через тоннель с Мака.
+_ANTIBOT_COOKIE_RE = re.compile(r"^(__ddg\d+_|__zzat.*|.*gib-w-hh)$")
+
+
+def _keep_cookie(name: str) -> bool:
+    return name in _AUTH_COOKIE_KEYS or bool(_ANTIBOT_COOKIE_RE.match(name))
+
+
 def _parse_cookies_str(raw: str) -> tuple:
     """
     Парсит cURL-запрос, 'Cookie: ...' или просто 'key=val; key2=val2'.
@@ -207,7 +216,7 @@ async def api_update_cookies(idx: int, body: dict):
 
     if 0 <= idx < len(bot.account_states):
         state = bot.account_states[idx]
-        auth_cookies = {k: v for k, v in cookies.items() if k in _AUTH_COOKIE_KEYS}
+        auth_cookies = {k: v for k, v in cookies.items() if _keep_cookie(k)}
         state.acc["cookies"] = auth_cookies
         state.acc["_raw_cookie_line"] = raw_line
         state.cookies_expired = False
@@ -219,7 +228,7 @@ async def api_update_cookies(idx: int, body: dict):
 
     temp_idx = idx - len(bot.account_states)
     if 0 <= temp_idx < len(bot.temp_sessions):
-        auth_cookies = {k: v for k, v in cookies.items() if k in _AUTH_COOKIE_KEYS}
+        auth_cookies = {k: v for k, v in cookies.items() if _keep_cookie(k)}
         bot.temp_sessions[temp_idx]["cookies"] = auth_cookies
         bot.temp_sessions[temp_idx]["_raw_cookie_line"] = raw_line
         if temp_idx in bot.temp_states:
@@ -305,7 +314,7 @@ async def api_account_add(request: Request):
     if not cookies or "hhtoken" not in cookies:
         return {"ok": False, "error": "Не удалось распознать cookies (нужен hhtoken)"}
 
-    auth_cookies = {k: v for k, v in cookies.items() if k in _AUTH_COOKIE_KEYS}
+    auth_cookies = {k: v for k, v in cookies.items() if _keep_cookie(k)}
     acc = {
         "name": name,
         "short": short or (name.split()[0] if name.split() else name),

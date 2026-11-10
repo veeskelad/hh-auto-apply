@@ -13,7 +13,7 @@ from app.storage import list_campaigns, save_browser_sessions, upsert_campaign
 from app.hh_resume import parse_hh_lux_ssr, _hh_ssr_str
 from app.instances import bot
 
-from app.routes.accounts import _parse_cookies_str, _AUTH_COOKIE_KEYS
+from app.routes.accounts import _parse_cookies_str, _keep_cookie
 
 
 router = APIRouter()
@@ -199,7 +199,7 @@ async def api_session_add(body: dict):
                 letter = acc.get("letter", "")
                 break
 
-    auth_cookies = {k: v for k, v in cookies.items() if k in _AUTH_COOKIE_KEYS}
+    auth_cookies = {k: v for k, v in cookies.items() if _keep_cookie(k)}
 
     # Дедуп по HH-АККАУНТУ (не по резюме): один человек = одна сессия. Обновление
     # куки того же аккаунта обновляет существующую сессию, а не плодит дубликаты.
