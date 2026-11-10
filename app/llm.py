@@ -392,7 +392,9 @@ def generate_llm_questionnaire_answers(rich_questions: list, vacancy_title: str 
             lines.append(f'{i}. [текст] {qtext}')
         elif qtype == "radio":
             opts = " / ".join(f'"{o["label"]}" (value={o["value"]})' for o in q.get("options", []))
-            lines.append(f'{i}. [выбор одного: {opts}] {qtext}')
+            own = (f' Свой вариант: value=open, а текст в поле "{q["text_field"]}".'
+                   if q.get("text_field") else "")
+            lines.append(f'{i}. [выбор одного: {opts}]{own} {qtext}')
         elif qtype == "checkbox":
             opts = " / ".join(f'"{o["label"]}" (value={o["value"]})' for o in q.get("options", []))
             lines.append(f'{i}. [чекбокс: {opts}] {qtext}')
@@ -404,12 +406,17 @@ def generate_llm_questionnaire_answers(rich_questions: list, vacancy_title: str 
         "Заполни анкету от первого лица по правилам из системного сообщения.",
         "Для текста — 1–5 предложений, на вопрос на знания можно подробнее.",
         "Для radio/checkbox/select — верни точное value из скобок (цифру или код).",
+        "Где есть «Свой вариант»: если ни один готовый вариант не точен для кандидата "
+        "(например, опыт смешанный), выбери open и напиши ответ в поле *_text; "
+        "иначе поле *_text оставь пустой строкой.",
         "",
         "Верни ТОЛЬКО JSON без пояснений:",
         "{"
     ]
     for q in rich_questions:
         lines.append(f'  "{q["field"]}": "...",')
+        if q.get("text_field"):
+            lines.append(f'  "{q["text_field"]}": "",')
     lines.append("}")
 
     system = (

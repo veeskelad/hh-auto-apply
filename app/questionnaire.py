@@ -20,6 +20,114 @@ def get_questionnaire_answer(question_text: str) -> str:
     return CONFIG.questionnaire_default_answer
 
 
+OPEN_VALUE = "open"
+OPEN_LABEL = "Свой вариант (текстом)"
+_NEGATIVE = ("нет", "no", "не готов", "не готова", "не могу")
+
+
+def _clean(s: str) -> str:
+    s = s.replace("​", " ").replace("\xa0", " ")
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _task_blocks(html: str) -> list:
+    """Вопросы анкеты по блокам data-qa="task-body": у каждого вопроса свой блок с текстом и полями.
+
+    Возвращает [{field, type, text, options: [{value, label}], text_field?}]. text_field есть у
+    вопроса с вариантами и «Своим вариантом»: radio task_N со значением open плюс textarea
+    task_N_text. Это один вопрос, а не два. Пустой список — разметка другая (старый разбор).
+    """
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:
+        return []
+    soup = BeautifulSoup(html, "html.parser")
+    out = []
+    for body in soup.find_all(attrs={"data-qa": "task-body"}):
+        q_el = body.find(attrs={"data-qa": "task-question"})
+        text = _clean(q_el.get_text(" ", strip=True)) if q_el else ""
+        inputs = [i for i in body.find_all(["input", "textarea", "select"])
+                  if re.match(r"task_\d+", i.get("name") or "")]
+        if not inputs:
+            continue
+        choice = [i for i in inputs if i.name == "input" and (i.get("type") or "").lower() in ("radio", "checkbox")]
+        textareas = [i for i in inputs if i.name == "textarea"]
+        selects = [i for i in inputs if i.name == "select"]
+        if choice:
+            name, typ = choice[0]["name"], choice[0]["type"].lower()
+            options = []
+            for i in choice:
+                v = i.get("value")
+                if i.get("name") != name or v is None:
+                    continue
+                if v == OPEN_VALUE:
+                    label = OPEN_LABEL
+                else:
+                    lab = i.find_parent("label")
+                    if lab is None and i.get("id"):
+                        lab = body.find("label", attrs={"for": i["id"]})
+                    label = _clean(lab.get_text(" ", strip=True)) if lab else ""
+                options.append({"value": v, "label": label or v})
+            q = {"field": name, "type": typ, "text": text, "options": options}
+            open_ta = next((t for t in textareas if t.get("name") == f"{name}_text"), None)
+            if open_ta is not None:
+                q["text_field"] = open_ta["name"]
+            out.append(q)
+        elif selects:
+            s = selects[0]
+            opts = [{"value": o.get("value", ""), "label": _clean(o.get_text(" ", strip=True))}
+                    for o in s.find_all("option") if o.get("value")]
+            out.append({"field": s["name"], "type": "select", "text": text, "options": opts})
+        elif textareas:
+            out.append({"field": textareas[0]["name"], "type": "textarea", "text": text, "options": []})
+    return out
+
+
+def answer_text(q: dict, answers: dict) -> str:
+    """Ответ на вопрос в читаемом виде: подпись варианта, а для «Своего варианта» — его текст."""
+    val = str(answers.get(q.get("field"), "") or "")
+    labels = {o.get("value"): o.get("label") for o in q.get("options") or []}
+    shown = labels.get(val, val)
+    tf = q.get("text_field")
+    extra = str(answers.get(tf, "") or "").strip() if tf else ""
+    if extra:
+        shown = extra if val == OPEN_VALUE else f"{shown}. {extra}"
+    return shown
+
+
+def _pick_option(options: list, answer: str) -> str:
+    """Вариант под шаблонный ответ: по подписи «да»/«нет», затем по словам ответа, иначе первый."""
+    regular = [o for o in options if o["value"] != OPEN_VALUE]
+    if not regular:
+        return options[0]["value"] if options else ""
+    labels = {o["value"]: o["label"].lower() for o in regular}
+    want = "нет" if any(w in answer for w in _NEGATIVE) else "да"
+    for v, lbl in labels.items():
+        if lbl == want or lbl.startswith(want + " ") or lbl.startswith(want + ","):
+            return v
+    for v, lbl in labels.items():
+        if any(kw in lbl for kw in answer.split() if len(kw) > 2):
+            return v
+    return regular[0]["value"]
+
+
+def _fields_from_blocks(blocks: list) -> tuple:
+    questions = [q["text"] for q in blocks]
+    field_answers = {}
+    for q in blocks:
+        tmpl = get_questionnaire_answer(q["text"])
+        if q["type"] == "textarea":
+            field_answers[q["field"]] = tmpl
+            continue
+        if not q["options"]:
+            continue
+        chosen = _pick_option(q["options"], tmpl.lower())
+        field_answers[q["field"]] = chosen
+        if q.get("text_field"):
+            field_answers[q["text_field"]] = tmpl if chosen == OPEN_VALUE else ""
+    return questions, field_answers
+
+
 def _parse_questionnaire_fields(html: str) -> tuple:
     """
     Парсит форму опросника. Возвращает (questions, field_answers):
@@ -27,6 +135,10 @@ def _parse_questionnaire_fields(html: str) -> tuple:
       field_answers: dict {field_name: answer_value} — готовые значения для POST
     Поддерживает textarea, radio, checkbox.
     """
+    blocks = _task_blocks(html)
+    if blocks:
+        return _fields_from_blocks(blocks)
+
     # Тексты вопросов
     q_blocks = re.findall(
         r'data-qa="task-question">(.*?)(?=data-qa="task-question"|</(?:div|section|form)>)',
@@ -121,8 +233,11 @@ def _parse_questionnaire_fields(html: str) -> tuple:
 
 def _parse_questionnaire_rich(html: str) -> list:
     """Парсит форму опросника и возвращает богатую структуру для LLM:
-    list of {field, type, text, options: [{value, label}]}
+    list of {field, type, text, options: [{value, label}], text_field?}
     """
+    blocks = _task_blocks(html)
+    if blocks:
+        return blocks
     q_blocks = re.findall(
         r'data-qa="task-question">(.*?)(?=data-qa="task-question"|</(?:div|section|form)>)',
         html, re.DOTALL

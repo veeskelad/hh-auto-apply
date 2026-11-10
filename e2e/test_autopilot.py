@@ -182,3 +182,64 @@ def test_digest(tmp_path, monkeypatch):
                                {"f": "Да, HA на Raft"}, "sent", by_llm=True)
     text = hh_digest.digest(date.today().isoformat())
     assert "Откликов: 1" in text and "Анкет: 1, приняты 1, нейросетью 1" in text and "HA на Raft" in text
+
+
+FORM_OPEN = """<form>
+<div data-qa="task-body"><div data-qa="task-question">Формат работы на двух последних местах?</div>
+<label><input name="task_1" type="radio" value="11"/><span>трудовой договор;</span></label>
+<label><input name="task_1" type="radio" value="12"/><span>ГПХ, ИП или самозанятый;</span></label>
+<label><input name="task_1" type="radio" value="open"/><span>Own variant</span></label>
+<textarea name="task_1_text"></textarea></div>
+<div data-qa="task-body"><div data-qa="task-question">Готовы к офису?</div>
+<label><input name="task_2" type="radio" value="21"/>да</label>
+<label><input name="task_2" type="radio" value="22"/>нет</label></div>
+<div data-qa="task-body"><div data-qa="task-question">Опыт с Vault?</div>
+<textarea name="task_3_text"></textarea></div>
+</form>"""
+
+
+def test_parse_open_variant_is_one_question():
+    from app.questionnaire import _parse_questionnaire_rich, _parse_questionnaire_fields
+    qs = _parse_questionnaire_rich(FORM_OPEN)
+    assert [q["type"] for q in qs] == ["radio", "radio", "textarea"]
+    first = qs[0]
+    assert first["text"] == "Формат работы на двух последних местах?"
+    assert first["text_field"] == "task_1_text"
+    assert [o["label"] for o in first["options"]][:2] == ["трудовой договор;", "ГПХ, ИП или самозанятый;"]
+    assert first["options"][-1]["value"] == "open"
+    assert qs[1]["text"] == "Готовы к офису?" and "text_field" not in qs[1]
+    questions, fa = _parse_questionnaire_fields(FORM_OPEN)
+    assert len(questions) == 3
+    assert fa["task_1"] in ("11", "12") and fa["task_1_text"] == ""
+    assert fa["task_2"] in ("21", "22") and "task_3_text" in fa
+
+
+def test_answer_text_open_variant():
+    from app.questionnaire import _parse_questionnaire_rich, answer_text
+    q = _parse_questionnaire_rich(FORM_OPEN)[0]
+    assert answer_text(q, {"task_1": "open", "task_1_text": "Штат и самозанятость"}) == "Штат и самозанятость"
+    assert answer_text(q, {"task_1": "11", "task_1_text": ""}) == "трудовой договор;"
+
+
+def test_questionnaire_prompt_open_variant(files, monkeypatch):
+    from app.questionnaire import _parse_questionnaire_rich
+    seen = {}
+
+    class Resp:
+        def __init__(self, text):
+            self.choices = [type("C", (), {"message": type("M", (), {"content": text})()})()]
+
+    class Client:
+        class chat:
+            class completions:
+                @staticmethod
+                def create(**kw):
+                    seen.update(kw)
+                    return Resp('{"task_1": "open", "task_1_text": "Штат, затем самозанятость"}')
+
+    monkeypatch.setattr(llm, "_client_for", lambda p: Client())
+    monkeypatch.setattr(llm.CONFIG, "llm_profiles", [{"name": "t", "api_key": "x", "base_url": "claude-cli"}])
+    ans = llm.generate_llm_questionnaire_answers(_parse_questionnaire_rich(FORM_OPEN)[:1], "SRE", "Acme")
+    assert ans == {"task_1": "open", "task_1_text": "Штат, затем самозанятость"}
+    user = seen["messages"][1]["content"]
+    assert 'value=open, а текст в поле "task_1_text"' in user and '"task_1_text": ""' in user

@@ -20,7 +20,8 @@ from app.logging_utils import log_debug, _is_login_page
 from app.config import CONFIG
 from app.hh_api import get_headers
 from app.oauth import _oauth_touch_resume
-from app.questionnaire import _parse_questionnaire_fields, _parse_questionnaire_rich, get_questionnaire_answer
+from app.questionnaire import (OPEN_VALUE, _parse_questionnaire_fields, _parse_questionnaire_rich,
+                               answer_text, get_questionnaire_answer)
 from app.llm import _randomize_text, generate_llm_questionnaire_answers, generate_cover_letter
 from app.hh_resume import fetch_all_resume_texts
 
@@ -239,9 +240,7 @@ def log_questionnaire(vid: str, title: str, company: str, rich_qs: list, answers
     try:
         qa = []
         for q in rich_qs or []:
-            val = str(answers.get(q.get("field"), ""))
-            labels = {o.get("value"): o.get("label") for o in q.get("options") or []}
-            qa.append({"q": q.get("text", ""), "a": labels.get(val, val)})
+            qa.append({"q": q.get("text", ""), "a": answer_text(q, answers)})
         rec = {"at": datetime.now().isoformat(timespec="seconds"), "vacancy_id": vid,
                "url": f"https://hh.ru/vacancy/{vid}", "title": title, "company": company,
                "result": result, "by_llm": by_llm, "qa": qa}
@@ -320,6 +319,13 @@ async def fill_and_submit_questionnaire(acc: dict, vid: str,
                                 validated_ans[field] = llm_val
                         else:
                             validated_ans[field] = llm_val
+                    # «Свой вариант» без текста hh не примет: оставляем шаблонный выбор
+                    for q in rich_qs:
+                        tf = q.get("text_field")
+                        if tf and validated_ans.get(q["field"]) == OPEN_VALUE \
+                                and not str(validated_ans.get(tf, "")).strip():
+                            validated_ans.pop(q["field"], None)
+                            validated_ans.pop(tf, None)
                     overridden = [f for f in validated_ans if f in field_answers]
                     for f in overridden:
                         field_answers[f] = validated_ans[f]

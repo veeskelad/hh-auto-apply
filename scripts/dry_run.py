@@ -44,7 +44,7 @@ def main() -> int:
     from app.hh_apply import fetch_vacancy_description
     from app.hh_resume import fetch_all_resume_texts
     from app.llm import generate_cover_letter, generate_llm_questionnaire_answers, profile_facts
-    from app.questionnaire import _parse_questionnaire_rich
+    from app.questionnaire import _parse_questionnaire_rich, answer_text
 
     sessions = json.loads(Path("data/browser_sessions.json").read_text(encoding="utf-8"))
     acc = sessions[a.session]
@@ -82,7 +82,7 @@ def main() -> int:
             for q in rich:
                 val = ans.get(q["field"], "")
                 labels = {o["value"]: o["label"] for o in q.get("options") or []}
-                shown = labels.get(val, val) or "— нет ответа —"
+                shown = answer_text(q, ans) or "— нет ответа —"
                 if q.get("options") and val and val not in labels:
                     shown += "  ⚠️ значения нет среди вариантов"
                 out += [f"**В:** {q['text']}", f"**О:** {shown}", ""]
