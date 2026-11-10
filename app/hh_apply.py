@@ -310,6 +310,16 @@ async def fill_and_submit_questionnaire(acc: dict, vid: str,
                                 and not str(validated_ans.get(tf, "")).strip():
                             validated_ans.pop(q["field"], None)
                             validated_ans.pop(tf, None)
+                    # Вопрос с вариантами без ответа нейросети: шаблон подставил бы первый вариант
+                    # («Да») — это выдумка. Такую анкету не отправляем.
+                    unanswered = [q["text"][:80] for q in rich_qs
+                                  if q["type"] in ("radio", "select") and q.get("options")
+                                  and not str(validated_ans.get(q["field"], "")).strip()]
+                    if unanswered:
+                        log_debug(f"Questionnaire {vid}: нет ответа по фактам на {unanswered}, анкету не отправляю")
+                        log_questionnaire(vid, vacancy_title, company, rich_qs, validated_ans, "skipped_no_facts",
+                                          by_llm=True)
+                        return "test", {"skipped": "no_facts", "questions": unanswered}
                     overridden = [f for f in validated_ans if f in field_answers]
                     for f in overridden:
                         field_answers[f] = validated_ans[f]

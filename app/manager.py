@@ -483,6 +483,7 @@ class BotManager:
         state.limit_exceeded = False
         state.limit_reset_time = None
         state.captcha_notified = False
+        state.captcha_hold = False
         state._needs_applied_sync = True
         state.armed = True
         state.status = "idle"
@@ -1069,7 +1070,10 @@ class BotManager:
                             state.status_detail = "Лимит HH. Проверка сейчас..."
                     else:
                         state.status_detail = "Лимит HH. Проверка через 1м"
-                elif state.status != "captcha":  # капчу видно до снятия паузы (по ней останавливается hh_cron)
+                elif getattr(state, "captcha_hold", False):  # капчу видно до нового запуска (по ней стоп hh_cron)
+                    state.status = "captcha"
+                    state.status_detail = "🧩 hh просит капчу на отклики"
+                else:
                     state.status = "idle"
                     state.status_detail = "Пауза пользователем"
                 time.sleep(1)
@@ -1404,7 +1408,9 @@ class BotManager:
             i = 0
 
             while i < len(filtered):
-                if self._stop_event.is_set() or self.paused or state.paused or state.limit_exceeded:
+                # «Стоп» кампании снимает armed: не дослать оставшиеся пачки цикла
+                if self._stop_event.is_set() or self.paused or state.paused or state.limit_exceeded \
+                        or (state.active_campaign_id and not state.armed):
                     break
 
                 batch = filtered[i: i + batch_size]
@@ -1691,6 +1697,7 @@ class BotManager:
                         # Решает человек по ссылке (обходить нельзя), бот стоит до снятия паузы.
                         url = (info or {}).get("captcha_url", "")
                         state.paused = True
+                        state.captcha_hold = True
                         state.status = "captcha"
                         state.status_detail = "🧩 hh просит капчу на отклики"
                         self._add_log(state.short, state.color,
