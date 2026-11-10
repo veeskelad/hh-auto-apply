@@ -155,7 +155,7 @@ def new_cards(tg: TG, chat_id: int, st: dict) -> None:
         if n.get("sent") or not n.get("draft_id"):
             continue
         live = pending_ids() if live is None else live
-        if n["draft_id"] not in live:  # черновик уже отправлен или убран в дашборде
+        if not n.get("demo") and n["draft_id"] not in live:  # черновик уже отправлен или убран в дашборде
             continue
         cid = str(st["next_id"])
         st["next_id"] += 1
@@ -163,7 +163,7 @@ def new_cards(tg: TG, chat_id: int, st: dict) -> None:
         msg = tg.call("sendMessage", chat_id=chat_id, text=card_text(n), parse_mode="HTML",
                       reply_markup=card_keyboard(cid, len(opts)), disable_web_page_preview=True)
         st["cards"][cid] = {"draft_id": n["draft_id"], "file": f.name, "message_id": msg["message_id"],
-                            "options": opts, "status": "open", "choice": ""}
+                            "options": opts, "status": "open", "choice": "", "demo": bool(n.get("demo"))}
         save_state(st)
 
 
@@ -216,17 +216,19 @@ def on_callback(tg: TG, chat_id: int, st: dict, cb: dict) -> None:
         card["choice"] = ""
         show_card(tg, chat_id, card, cid, keyboard=card_keyboard(cid, len(card["options"])))
     elif action == "skip":
-        api("POST", "/api/llm/pending/discard", {"ids": [card["draft_id"]]})
+        if not card.get("demo"):
+            api("POST", "/api/llm/pending/discard", {"ids": [card["draft_id"]]})
         card["status"] = "skipped"
         show_card(tg, chat_id, card, cid, "⏭ <i>Пропущено, работодателю ничего не ушло</i>")
     elif action == "send" and card.get("choice"):
-        why = send_choice(card)
+        why = "" if card.get("demo") else send_choice(card)
         if why:
             note = "Не отправилось"
             show_card(tg, chat_id, card, cid, f"❌ {e(why)}", card_keyboard(cid, len(card["options"])))
         else:
             card["status"] = "sent"
-            show_card(tg, chat_id, card, cid, f"✅ <b>Отправлено:</b> {e(card['choice'])}")
+            done = "✅ <b>Демо, работодателю не ушло:</b> " if card.get("demo") else "✅ <b>Отправлено:</b> "
+            show_card(tg, chat_id, card, cid, done + e(card["choice"]))
     save_state(st)
     tg.call("answerCallbackQuery", callback_query_id=cb["id"], text=note)
 
