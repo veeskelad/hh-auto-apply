@@ -278,3 +278,28 @@ def test_poll_captcha(tmp_path, monkeypatch):
     text = poll_notifications.poll()
     assert "капчу" in text and "account/captcha?state=x" in text
     assert "Ошибки откликов" not in text
+
+
+@pytest.mark.parametrize("status, body, want", [
+    (200, '{"success": "true", "response_label": "req-letter-no-test", "responseStatus": '
+          '{"alreadyApplied": false, "shortVacancy": {"name": "SRE", "company": {"name": "Acme"}}}}', "sent"),
+    (200, '{"success": "false", "error": "test-required"}', "test"),
+    (200, '{"responseStatus": {"alreadyApplied": true}}', "already"),
+    (200, '{"error": "negotiations-limit-exceeded"}', "limit"),
+    (403, '{"errors": [{"value": "captcha_required"}]}', "captcha"),
+    (200, '<html>что-то другое</html>', "error"),
+])
+def test_web_apply_result(monkeypatch, status, body, want):
+    import asyncio
+    class R:
+        status_code, text = status, body
+    monkeypatch.setattr(hh_apply.requests, "post", lambda *a, **kw: R())
+
+    async def _letter(acc, vid):
+        return "письмо"
+    monkeypatch.setattr(hh_apply, "_resolve_letter", _letter)
+    acc = {"name": "t", "resume_hash": "r", "cookies": {"_xsrf": "x"}}
+    res, info = asyncio.run(hh_apply.send_response_async(acc, "1"))
+    assert res == want
+    if want == "sent":
+        assert info["title"] == "SRE" and info["company"] == "Acme"

@@ -144,33 +144,29 @@ async def send_response_async(acc: dict, vid: str) -> tuple:
 
     letter = await _resolve_letter(acc, vid)
 
-    data = aiohttp.FormData()
-    data.add_field("resume_hash", acc["resume_hash"])
-    data.add_field("vacancy_id", vid)
-    data.add_field("letterRequired", "true")
-    data.add_field("letter", letter)
-    data.add_field("lux", "true")
-    data.add_field("ignore_postponed", "true")
-
-    ssl_context = ssl.create_default_context()
-    ssl_context.check_hostname = False
-    ssl_context.verify_mode = ssl.CERT_NONE
-
-    connector = aiohttp.TCPConnector(ssl=ssl_context)
+    form = {"resume_hash": acc["resume_hash"], "vacancy_id": vid, "letterRequired": "true",
+            "letter": letter, "lux": "true", "ignore_postponed": "true"}
+    headers.update({
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/130.0 Safari/537.36",
+        "Referer": f"https://hh.ru/vacancy/{vid}", "X-Requested-With": "XMLHttpRequest",
+        "Accept": "application/json",
+    })
 
     try:
-        async with aiohttp.ClientSession(headers=headers, cookies=acc["cookies"], connector=connector) as session:
-            async with session.post(
-                "https://hh.ru/applicant/vacancy_response/popup",
-                data=data,
-                timeout=aiohttp.ClientTimeout(total=10)
-            ) as r:
-                txt = await r.text()
-                status_code = r.status
+        # Через requests: на *.hh.ru его подменяет curl_cffi с TLS Chrome (app/hh_transport).
+        # aiohttp шёл со своим TLS-отпечатком мимо этой подмены.
+        r = await asyncio.to_thread(
+            requests.post, "https://hh.ru/applicant/vacancy_response/popup",
+            data=form, headers=headers, cookies=acc["cookies"], timeout=30)
+        txt, status_code = r.text, r.status_code
 
         log_debug(f"   Ответ HTTP: {status_code} | Размер: {len(txt)}")
         if status_code >= 400:
             log_debug(f"   Тело ответа: {txt[:300]}")
+
+        if "captcha" in txt.lower() and '"success": "true"' not in txt and '"success":"true"' not in txt:
+            return "captcha", {"captcha_url": "https://hh.ru/applicant/vacancy_response?vacancyId=" + vid}
 
         if status_code in (401, 403):
             return "auth_error", {}
@@ -178,36 +174,29 @@ async def send_response_async(acc: dict, vid: str) -> tuple:
         if status_code == 200 and _is_login_page(txt):
             return "auth_error", {}
 
-        if status_code == 200:
-            if "shortVacancy" in txt:
-                try:
-                    p = json.loads(txt)
-                    info = {
-                        "title": glom(p, "responseStatus.shortVacancy.name", default="?"),
-                        "company": glom(p, "responseStatus.shortVacancy.company.name", default="?"),
-                        "salary_from": glom(p, "responseStatus.shortVacancy.compensation.from", default=None),
-                        "salary_to": glom(p, "responseStatus.shortVacancy.compensation.to", default=None),
-                    }
-                    # Extract HR contact info
-                    ci = glom(p, "responseStatus.shortVacancy.contactInfo", default={})
-                    if ci and (ci.get("email") or ci.get("fio")):
-                        contact = {"fio": ci.get("fio", ""), "email": ci.get("email", ""), "phone": ""}
-                        phones = (ci.get("phones") or {}).get("phones", [])
-                        if phones:
-                            ph = phones[0]
-                            contact["phone"] = f"+{ph.get('country','')}{ph.get('city','')}{ph.get('number','')}"
-                        info["contact"] = contact
-                    return "sent", info
-                except Exception as e:
-                    return "sent", {}
-
-            if '"success":true' in txt or '"status":"ok"' in txt or '"responded":true' in txt:
-                return "sent", {}
-
-            return "sent", {}
-
         if "negotiations-limit-exceeded" in txt:
             return "limit", {}
+
+        try:
+            p = json.loads(txt) if status_code == 200 else {}
+        except ValueError:
+            p = {}
+        if str(p.get("success")).lower() == "true":
+            info = {
+                "title": glom(p, "responseStatus.shortVacancy.name", default=""),
+                "company": glom(p, "responseStatus.shortVacancy.company.name", default=""),
+                "salary_from": glom(p, "responseStatus.shortVacancy.compensation.from", default=None),
+                "salary_to": glom(p, "responseStatus.shortVacancy.compensation.to", default=None),
+            }
+            ci = glom(p, "responseStatus.shortVacancy.contactInfo", default={}) or {}
+            if ci.get("email") or ci.get("fio"):
+                contact = {"fio": ci.get("fio", ""), "email": ci.get("email", ""), "phone": ""}
+                phones = (ci.get("phones") or {}).get("phones", [])
+                if phones:
+                    ph = phones[0]
+                    contact["phone"] = f"+{ph.get('country','')}{ph.get('city','')}{ph.get('number','')}"
+                info["contact"] = contact
+            return "sent", info
 
         if "test-required" in txt:
             info = {}
@@ -256,27 +245,22 @@ async def fill_and_submit_questionnaire(acc: dict, vid: str,
     Поддерживает textarea, radio, checkbox.
     Возвращает (result, info): result = sent | limit | test | error
     """
-    ssl_ctx = ssl.create_default_context()
-    ssl_ctx.check_hostname = False
-    ssl_ctx.verify_mode = ssl.CERT_NONE
-    connector = aiohttp.TCPConnector(ssl=ssl_ctx)
-
     headers_get = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Referer": f"https://hh.ru/vacancy/{vid}",
     }
 
     try:
-        async with aiohttp.ClientSession(
-            cookies=acc["cookies"], connector=connector,
-            headers=headers_get
-        ) as session:
+        # requests на *.hh.ru идёт через curl_cffi с TLS Chrome (app/hh_transport), aiohttp — мимо
+        with requests.Session() as session:
+            session.headers.update(headers_get)
+            session.cookies.update(acc["cookies"])
             url_form = f"https://hh.ru/applicant/vacancy_response?vacancyId={vid}&withoutTest=no"
 
             # Шаг 1: GET форма опроса
-            async with session.get(url_form, timeout=aiohttp.ClientTimeout(total=15)) as r:
-                html = await r.text()
+            r = await asyncio.to_thread(session.get, url_form, timeout=20)
+            html = r.text
 
             # Hidden поля
             hidden = dict(re.findall(r'<input[^>]+type="hidden"[^>]+name="([^"]+)"[^>]+value="([^"]*)"', html))
@@ -339,30 +323,24 @@ async def fill_and_submit_questionnaire(acc: dict, vid: str,
                 log_debug(f"  {name} = {str(val)[:80]}")
 
             # Шаг 2: POST данные
-            data = aiohttp.FormData()
-            data.add_field("resume_hash", acc["resume_hash"])
-            data.add_field("vacancy_id", vid)
-            data.add_field("letter", await _resolve_letter(acc, vid))
-            data.add_field("lux", "true")
+            data = [("resume_hash", acc["resume_hash"]), ("vacancy_id", vid),
+                    ("letter", await _resolve_letter(acc, vid)), ("lux", "true")]
 
             for name in ("_xsrf", "uidPk", "guid", "startTime", "testRequired"):
                 if name in hidden:
-                    data.add_field(name, hidden[name])
+                    data.append((name, hidden[name]))
 
             for name, value in field_answers.items():
-                data.add_field(name, str(value))
+                data.append((name, str(value)))
 
             # Шаг 3: POST
-            async with session.post(
-                url_form,
+            r2 = await asyncio.to_thread(
+                session.post, url_form,
                 headers={"X-Xsrftoken": acc.get("cookies", {}).get("_xsrf", ""), "Referer": url_form},
-                data=data,
-                timeout=aiohttp.ClientTimeout(total=15),
-                allow_redirects=False,
-            ) as r2:
-                status = r2.status
-                location = r2.headers.get("location", "")
-                txt = await r2.text()
+                data=data, timeout=20, allow_redirects=False)
+            status = r2.status_code
+            location = r2.headers.get("location", "")
+            txt = r2.text
 
             log_debug(f"Questionnaire submit {vid}: HTTP {status} location={location}")
 

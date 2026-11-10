@@ -1069,7 +1069,7 @@ class BotManager:
                             state.status_detail = "Лимит HH. Проверка сейчас..."
                     else:
                         state.status_detail = "Лимит HH. Проверка через 1м"
-                else:
+                elif state.status != "captcha":  # капчу видно до снятия паузы (по ней останавливается hh_cron)
                     state.status = "idle"
                     state.status_detail = "Пауза пользователем"
                 time.sleep(1)
