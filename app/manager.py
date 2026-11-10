@@ -1275,10 +1275,16 @@ class BotManager:
             eff_skip_inconsistent = bool(acc["skip_inconsistent"]) if "skip_inconsistent" in acc else CONFIG.skip_inconsistent
 
             def _apply_pause():
-                """Рандомизированная пауза между откликами — чтобы не отправлять пачку
-                мгновенно (анти-burst/анти-детект). Минимум ~3с + джиттер."""
+                """Рандомизированная пауза между откликами (анти-burst): от response_delay до ~1,6×.
+                10.11 залп ~15 откликов за минуты включил на аккаунте капчу на каждый отклик.
+                Пауза прерывается «Стопом» и паузой, чтобы не висеть минутами."""
                 base = max(int(eff_delay or 0), 3)
-                time.sleep(random.uniform(base, base + 4))
+                end = time.time() + random.uniform(base, base * 1.6 + 4)
+                while time.time() < end:
+                    if self._stop_event.is_set() or state.paused or \
+                            (state.active_campaign_id and not state.armed):
+                        return
+                    time.sleep(min(5, max(0.1, end - time.time())))
 
             # Фильтрация
             filtered = []
