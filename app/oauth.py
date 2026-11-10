@@ -163,7 +163,9 @@ def _oauth_apply(acc: dict, vid: str, message: str = "") -> tuple:
                 return "test", {}
             return "error", {"raw": err}
         elif r.status_code in (401, 403):
-            return "auth_error", {}
+            # Причину пишем в лог: «протухший токен», капча и запрет на отклик выглядят одинаково по коду
+            log_debug(f"OAuth apply {vid}: HTTP {r.status_code} {r.text[:300]}")
+            return "auth_error", {"raw": r.text[:200]}
         elif r.status_code == 404:
             return "error", {"raw": "Вакансия не найдена"}
         else:
