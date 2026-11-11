@@ -59,7 +59,7 @@ def test_plan_auto_category(files, monkeypatch):
         "category": "experience", "confidence": 0.9, "reply": "Да — работал с Vault",
         "variants": ["Вариант 2", "Вариант 3"], "reason": "вопрос про опыт"}, ensure_ascii=False))
     plan = llm.generate_llm_reply_plan([{"sender": "employer", "text": "Был опыт с Vault?"}], "Acme")
-    assert plan["auto"] is False and plan["category"] == "experience"  # опыт — только черновиком
+    assert plan["auto"] is True and plan["category"] == "experience"  # Vault есть в фактах
     assert "—" not in plan["reply"]
     assert plan["variants"] == ["Вариант 2", "Вариант 3"]
     system = seen["messages"][0]["content"]
@@ -79,6 +79,75 @@ def test_plan_not_auto(files, monkeypatch, payload, auto):
     assert plan["auto"] is auto
     if payload["category"] == "something":
         assert plan["category"] == "unknown"
+
+
+# 11.11: «Правительство Москвы» прислало 14 требований, бот сам ответил «Да, Kafka»,
+# а Kafka нет ни в фактах, ни в резюме
+MOSCOW_REQUIREMENTS = "\n".join(f"{i}. Требование {i}: опыт?" for i in range(1, 15))
+MOSCOW_REPLY = ("1. Да, Kubernetes\n11. Да, Kafka и Redis-совместимый Valkey с Sentinel\n"
+                "14. Нет, Keycloak не использовал")
+
+
+@pytest.mark.parametrize("reply, want", [
+    ("11. Да, Kafka и Redis-совместимый Valkey с Sentinel", ["Kafka"]),
+    ("14. Нет, Keycloak не использовал", []),
+    ("С Kafka не работал, но поднимал RabbitMQ", ["RabbitMQ"]),
+    ("Да, Kafka, но не RabbitMQ", ["Kafka"]),
+    ("Без опыта с Jenkins, CI делал в GitLab", []),
+    ("Работал не только с Kafka", ["Kafka"]),
+    ("Да, Vault HA в Kubernetes", []),                 # в фактах
+    ("Писал сервисы на Go и деплоил в AWS EKS", ["AWS", "Go"]),
+    ("Сделаю, как скажете, go-live через неделю", []),  # «go» в тексте — не язык
+    ("Дообучал модели через LoRA", ["LoRA/fine-tuning"]),
+])
+def test_fact_check_reply(reply, want):
+    assert llm.fact_check_reply(reply, "DevOps в Acme, Vault HA", "Резюме: Kubernetes, GitLab CI") == want
+
+
+def test_fact_check_skips_resume_tech():
+    assert llm.fact_check_reply("Да, Kafka в проде", "Acme", "Стек: Kafka, Kubernetes") == []
+
+
+def plan_for(monkeypatch, question, reply, category="experience"):
+    fake_llm(monkeypatch, json.dumps({"category": category, "confidence": 0.95, "reply": reply,
+                                      "reason": "вопрос про опыт"}, ensure_ascii=False))
+    return llm.generate_llm_reply_plan([{"sender": "employer", "text": question}], "Правительство Москвы")
+
+
+def test_moscow_14_items_is_draft(files, monkeypatch):
+    plan = plan_for(monkeypatch, MOSCOW_REQUIREMENTS, MOSCOW_REPLY)
+    assert plan["auto"] is False
+    assert "Kafka" in plan["reason"] and "Keycloak" not in plan["reason"]
+    assert "14 пунктов" in plan["reason"] and plan["reason"].endswith("вопрос про опыт")
+
+
+def test_kafka_short_question_is_draft(files, monkeypatch):
+    plan = plan_for(monkeypatch, "Есть опыт с Kafka?", "Да, Kafka и Redis-совместимый Valkey с Sentinel")
+    assert plan["auto"] is False and "Kafka" in plan["reason"]
+
+
+def test_keycloak_no_does_not_block(files, monkeypatch):
+    plan = plan_for(monkeypatch, "Работали с Keycloak?", "14. Нет, Keycloak не использовал")
+    assert plan["auto"] is True and plan["reason"] == "вопрос про опыт"
+
+
+def test_long_list_in_reply_is_draft(files, monkeypatch):
+    reply = "\n".join(f"- пункт {i}: да, Vault" for i in range(5))
+    assert plan_for(monkeypatch, "Расскажите про опыт", reply)["auto"] is False
+
+
+def test_fact_check_any_category(files, monkeypatch):
+    plan = plan_for(monkeypatch, "Спасибо!", "Спасибо, Kafka у меня в проде", category="thanks")
+    assert plan["auto"] is False
+
+
+@pytest.mark.parametrize("text, n", [
+    (MOSCOW_REQUIREMENTS, 14),
+    ("1) Python 2) Kubernetes 3) Vault 4) CI 5) Linux", 5),
+    ("Зарплата от 300 000, Python 3.11, опыт 3 года", 0),
+])
+def test_count_list_items(text, n):
+    assert llm.count_list_items(text) == n
 
 
 def test_plan_plain_text_is_draft(files, monkeypatch):

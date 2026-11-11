@@ -39,7 +39,7 @@ from app.hh_api import (
     parse_work_schedules, extract_search_query,
 )
 
-from app.llm import generate_llm_reply, generate_llm_reply_plan, chat_playbook
+from app.llm import generate_llm_reply, generate_llm_reply_plan, chat_playbook, fact_check_reply, profile_facts
 from app.hh_transport import proxy_alive
 from app.notify import (notify_interview, notify_response, notify_error, notify_chat, notify_auth_expired,
                         notify_captcha, notify_check)
@@ -2218,6 +2218,13 @@ class BotManager:
                                   f"({plan.get('confidence')}), авто={plan.get('auto')}")
                 else:
                     reply_text = generate_llm_reply(conversation, thread.get("employer_name", ""), cover_letter, resume_text)
+                    # Без плейбука та же проверка фактов: неподтверждённая технология → черновик владельцу
+                    unconfirmed = fact_check_reply(reply_text or "", profile_facts(), resume_text)
+                    if unconfirmed:
+                        plan = {"category": "experience", "confidence": 0.0, "reply": reply_text,
+                                "variants": [], "auto": False,
+                                "reason": "не подтверждено фактами и резюме: " + ", ".join(unconfirmed)}
+                        log_debug(f"LLM [{state.short}] {neg_id}: {plan['reason']} — черновик")
                 send_now = CONFIG.llm_auto_send and (plan is None or bool(plan.get("auto")))
                 # LLM решил, что ответ не нужен (вежливость/уведомление без вопроса)
                 if reply_text and "[NO_REPLY]" in reply_text.upper():

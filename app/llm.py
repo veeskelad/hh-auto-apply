@@ -248,10 +248,75 @@ def generate_llm_reply(conversation: list, employer_name: str = "", cover_letter
         return ""
 
 
-# Категории плейбука: в каких бот отвечает сам, а в каких только готовит черновик владельцу
-CHAT_AUTO_CATEGORIES = {"thanks", "salary_format", "contacts", "test_task", "interview_invite"}  # experience — черновиком: 11.11 бот сам ответил «Да, Kafka»
-CHAT_CATEGORIES = CHAT_AUTO_CATEGORIES | {"experience", "offer", "negotiation", "rejection", "unknown", "no_reply"}
+# Категории плейбука: в каких бот отвечает сам, а в каких только готовит черновик владельцу.
+# experience: 11.11 бот сам ответил «Да, Kafka», а Kafka нет ни в фактах, ни в резюме. Вернули в
+# автоответ только вместе с fact_check_reply: ответ с неподтверждённой технологией уходит черновиком.
+CHAT_AUTO_CATEGORIES = {"thanks", "salary_format", "contacts", "test_task", "interview_invite", "experience"}
+CHAT_CATEGORIES = CHAT_AUTO_CATEGORIES | {"offer", "negotiation", "rejection", "unknown", "no_reply"}
 CHAT_AUTO_MIN_CONFIDENCE = 0.7
+# Список требований «да/нет» от стольких пунктов владелец проверяет сам
+CHAT_LONG_LIST_ITEMS = 5
+
+# Технологии, которые нейросеть любит «подтверждать». Название → регэксп. Чего нет ни в фактах,
+# ни в резюме, то ответ утверждать не должен. Go — с учётом регистра: иначе ловит «go» в тексте.
+_TECH_PATTERNS = {
+    "Kafka": r"\bkafka\b|\bкафк",
+    "RabbitMQ": r"\brabbit\s*mq\b|\brabbit\b|\bкролик",
+    "AWS": r"\baws\b|amazon web services|\beks\b|\bec2\b",
+    "GCP": r"\bgcp\b|google cloud|\bgke\b",
+    "Azure": r"\bazure\b|\baks\b",
+    "Jenkins": r"\bjenkins\b|\bдженкинс",
+    "Loki": r"\bloki\b",
+    "HAProxy": r"\bha\s*proxy\b",
+    "MongoDB": r"\bmongo(?:db)?\b|\bмонго",
+    "MySQL": r"\bmysql\b",
+    "Keycloak": r"\bkeycloak\b|\bкейклоак",
+    "Istio": r"\bistio\b",
+    "OpenTelemetry/Jaeger": r"\bopen\s*telemetry\b|\botel\b|\bjaeger\b",
+    "PyTorch": r"\bpy\s*torch\b|\btorch\b",
+    "LoRA/fine-tuning": r"\bq?lora\b|\bfine[- ]?tun|\bфайн[- ]?тюн|\bдообуч",
+    "Airflow": r"\bairflow\b",
+    "MLflow": r"\bml\s*flow\b",
+    "Ceph": r"\bceph\b",
+    "OpenStack": r"\bopen\s*stack\b",
+}
+_TECH_RE = {name: re.compile(p, re.IGNORECASE) for name, p in _TECH_PATTERNS.items()}
+_TECH_RE["Go"] = re.compile(r"\bGo(?:lang)?\b|\bgolang\b")
+# Отрицание во фрагменте: «нет», «не работал», «без опыта». «не только», «не менее» — не отрицание.
+_NEGATION_RE = re.compile(
+    r"\bнет\b|\bне\b(?!\s+(?:только|менее|меньше|раз|один|одн))|\bни разу\b|\bбез\s+(?:опыта|практики|продакшн)",
+    re.IGNORECASE)
+# Фрагменты ответа: строки, предложения и части после «но», «зато», «а вот»
+_CLAUSE_SPLIT_RE = re.compile(r"[\n.;!?]+|,?\s+(?:но|зато|а вот|однако)\s+", re.IGNORECASE)
+_LIST_ITEM_RE = re.compile(r"(?:^|\s)(\d{1,2})[.)]\s+\S|^\s*[-•*]\s+\S", re.MULTILINE)
+
+
+def fact_check_reply(reply: str, facts_text: str, resume_text: str) -> list:
+    """Технологии, которые ответ утверждает, а в фактах и резюме их нет.
+
+    Ответ режется на фрагменты (строки, предложения, части после «но»); фрагмент с отрицанием
+    («нет», «не работал», «без опыта») не утверждение. Технологии из фактов и резюме пропускаются.
+    """
+    source = f"{facts_text or ''}\n{resume_text or ''}"
+    affirmed = set()
+    for clause in _CLAUSE_SPLIT_RE.split(reply or ""):
+        if not clause or not clause.strip() or _NEGATION_RE.search(clause):
+            continue
+        for name, rx in _TECH_RE.items():
+            if rx.search(clause):
+                affirmed.add(name)
+    return [name for name in _TECH_RE if name in affirmed and not _TECH_RE[name].search(source)]
+
+
+def count_list_items(text: str) -> int:
+    """Пунктов в списке: разные номера «1.» / «2)» или строки-маркеры «-», «•»."""
+    numbers, bullets = set(), 0
+    for m in _LIST_ITEM_RE.finditer(text or ""):
+        if m.group(1):
+            numbers.add(int(m.group(1)))
+        else:
+            bullets += 1
+    return max(len(numbers), bullets)
 
 
 def generate_llm_reply_plan(conversation: list, employer_name: str = "", cover_letter: str = "",
@@ -310,9 +375,22 @@ def generate_llm_reply_plan(conversation: list, employer_name: str = "", cover_l
         conf = 0.0
     reply = _no_dash(str(plan.get("reply") or ""))
     variants = [_no_dash(str(v)) for v in (plan.get("variants") or []) if str(v).strip()][:3]
+    reason = str(plan.get("reason") or "")
+    auto = cat in CHAT_AUTO_CATEGORIES and conf >= CHAT_AUTO_MIN_CONFIDENCE and bool(reply)
+    # Детерминированные проверки поверх оценки модели: только снимают автоотправку
+    guards = []
+    unconfirmed = fact_check_reply(reply, profile_facts(), resume_text)
+    if unconfirmed:
+        guards.append("не подтверждено фактами и резюме: " + ", ".join(unconfirmed))
+    employer_text = "\n".join(m.get("text", "") for m in conversation[-8:] if m.get("sender") == "employer")
+    items = max(count_list_items(employer_text), count_list_items(reply))
+    if items >= CHAT_LONG_LIST_ITEMS:
+        guards.append(f"список требований из {items} пунктов, проверь сам")
+    if guards:
+        auto = False
+        reason = "; ".join(guards) + (f". {reason}" if reason else "")
     return {"category": cat, "confidence": conf, "reply": reply, "variants": variants,
-            "reason": str(plan.get("reason") or "")[:300],
-            "auto": cat in CHAT_AUTO_CATEGORIES and conf >= CHAT_AUTO_MIN_CONFIDENCE and bool(reply)}
+            "reason": reason[:300], "auto": auto}
 
 
 def _llm_chat(messages: list, max_tokens: int = 300, temperature: float = 0.7, label: str = "llm") -> str:
