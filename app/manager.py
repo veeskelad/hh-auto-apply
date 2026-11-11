@@ -692,6 +692,10 @@ class BotManager:
         result: str,
         salary: str = "",
     ):
+        # Отклик с анкетой и ошибки приходят без названия: берём из выдачи поиска
+        meta = getattr(state, "vacancy_meta", {}).get(vid, {}) if vid else {}
+        title = title or meta.get("title", "") or f"вакансия {vid}"
+        company = company or meta.get("company", "")
         result_icons = {
             "sent": "✅",
             "test": "\U0001f9ea",

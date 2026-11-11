@@ -276,7 +276,7 @@ def test_poll_captcha(tmp_path, monkeypatch):
     monkeypatch.setattr(poll_notifications, "NOTIFY_DIR", tmp_path)
     notify.notify_captcha("acc", "https://hh.ru/account/captcha?state=x&backurl=https%3A%2F%2Fhh.ru%2F")
     text = poll_notifications.poll()
-    assert "капчу" in text and "account/captcha?state=x" in text
+    assert "капчу" in text and "до завтра" in text and "Ничего делать не нужно" in text
     assert "Ошибки откликов" not in text
 
 
@@ -420,3 +420,22 @@ def test_cron_captcha_cooldown(tmp_path, monkeypatch):
 def test_plan_thanks_is_auto(files, monkeypatch):
     fake_llm(monkeypatch, json.dumps({"category": "thanks", "confidence": 0.9, "reply": "Спасибо!"}))
     assert llm.generate_llm_reply_plan([{"sender": "employer", "text": "Спасибо за отклик!"}])["auto"] is True
+
+
+def test_reply_bot_md_to_html():
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    import hh_reply_bot as b
+    h = b.md_to_html("## 📊 hh за день\n**Жирно** и `hh skip x`\n> цитата <a>\n> вторая\n- пункт & ещё")
+    assert "<b>📊 hh за день</b>" in h and "<b>Жирно</b>" in h and "<code>hh skip x</code>" in h
+    assert "<blockquote>цитата &lt;a&gt;\nвторая</blockquote>" in h and "пункт &amp; ещё" in h
+
+
+def test_poll_quiet_hides_responses_and_errors(tmp_path, monkeypatch):
+    poll_notifications, _ = _scripts()
+    monkeypatch.setattr(notify, "NOTIFY_DIR", tmp_path)
+    monkeypatch.setattr(poll_notifications, "NOTIFY_DIR", tmp_path)
+    notify.notify_response("DevOps", "Acme")
+    notify.notify_error("Acme", "SRE", "ошибка отправки")
+    notify.notify_captcha("acc", "")
+    text = poll_notifications.poll(quiet=True)
+    assert "капчу" in text and "Отклики" not in text and "Ошибки откликов" not in text

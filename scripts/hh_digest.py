@@ -95,5 +95,18 @@ def digest(day: str) -> str:
     return "\n".join(out).strip()
 
 
+def _reply_bot_alive() -> bool:
+    try:
+        import time
+        st = json.loads((DATA / "reply_bot_state.json").read_text(encoding="utf-8"))
+        return time.time() - float(st.get("alive_at", 0)) < 300
+    except Exception:
+        return False
+
+
 if __name__ == "__main__":
-    print(digest(sys.argv[1] if len(sys.argv) > 1 else date.today().isoformat()))
+    # Итог дня шлёт @ninjiu_bot (hh_reply_bot.py); Hermes — только если бот лежит
+    if _reply_bot_alive() and "--force" not in sys.argv[1:]:
+        print("[SILENT]")
+    else:
+        print(digest(next((x for x in sys.argv[1:] if not x.startswith("--")), date.today().isoformat())))

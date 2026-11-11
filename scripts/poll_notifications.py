@@ -58,7 +58,9 @@ def _chat_block(n: dict) -> list:
     return lines
 
 
-def poll(mark: bool = True) -> str:
+def poll(mark: bool = True, quiet: bool = False) -> str:
+    """Свежие уведомления одним сообщением. quiet=True (для @ninjiu_bot): отклики и ошибки
+    по отдельным вакансиям не показываются — они в итоге дня (hh_digest.py)."""
     if not NOTIFY_DIR.exists():
         return "[SILENT]"
     fresh = []
@@ -97,16 +99,16 @@ def poll(mark: bool = True) -> str:
     captcha = [n for n in by.get("error", []) if n.get("subtype") == "captcha"]
     if captcha:
         url = captcha[-1].get("captcha_url", "")
-        lines += ["🧩 **hh просит капчу на отклики, бот стоит.** Открой ссылку в браузере, где вошёл в hh, "
-                  "реши капчу. Кампании продолжат при следующем запуске по расписанию.",
-                  url or "(ссылки нет, открой hh.ru)", ""]
+        lines += ["🧩 **hh включил капчу на отклики, бот остановился до завтра.** Так hh делает примерно "
+                  "после 12 откликов за сутки, к утру снимает сам. Ничего делать не нужно: кампании "
+                  "продолжат в следующий запуск по расписанию.", ""]
     errors = [n for n in by.pop("error", []) if n.get("subtype") not in ("auth", "captcha")]
-    if errors:
+    if errors and not quiet:
         lines.append(f"⚠️ Ошибки откликов: {len(errors)}")
         lines += [f"- {n.get('message', '')}" for n in errors[:3]]
         lines.append("")
     responses = by.pop("response", [])
-    if responses:
+    if responses and not quiet:
         names = ", ".join(f"{n.get('title', '')} ({n.get('company', '')})" for n in responses[:5])
         more = f" и ещё {len(responses) - 5}" if len(responses) > 5 else ""
         lines += [f"📤 Отклики: {len(responses)} — {names}{more}", ""]
@@ -117,4 +119,9 @@ def poll(mark: bool = True) -> str:
 
 
 if __name__ == "__main__":
-    print(poll(mark="--peek" not in sys.argv))
+    # Пока жив @ninjiu_bot (hh_reply_bot.py), уведомления доставляет он, Hermes молчит и не
+    # помечает их доставленными. Бот упал — Hermes снова присылает всё сам (запасной канал).
+    if _reply_bot_alive() and "--force" not in sys.argv:
+        print("[SILENT]")
+    else:
+        print(poll(mark="--peek" not in sys.argv))

@@ -7,8 +7,10 @@
 Карточка на каждый черновик: сообщение работодателя, варианты кнопками, «Свой ответ»,
 «Пропустить». Вариант или свой текст сначала показываются с вопросом «Отправить?», и только
 после «Отправить» уходят работодателю через очередь дашборда (/api/llm/pending/*).
-Остальное (отклики, сводка, капча, вход) по-прежнему идёт через Hermes: poll_notifications.py
-пропускает черновики, пока этот бот жив (heartbeat в data/reply_bot_state.json).
+Сюда же идут остальные уведомления hh: сразу — капча, протухший вход, приглашения, ответы,
+отправленные ботом сам; отклики и ошибки по вакансиям — в итоге дня (20:30 по HH_DIGEST_TZ).
+Пока бот жив (heartbeat в data/reply_bot_state.json), Hermes по hh молчит; бот упал — Hermes
+снова присылает всё сам.
 
 .env: HH_REPLY_BOT_TOKEN — токен бота, HH_REPLY_CHAT_ID — id владельца (команды принимаются
 только от него). Токен никуда не печатается.
@@ -16,9 +18,12 @@
 import html
 import json
 import os
+import re
 import sys
 import time
+from datetime import date, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -256,6 +261,60 @@ def on_message(tg: TG, chat_id: int, st: dict, msg: dict) -> None:
     save_state(st)
 
 
+def md_to_html(text: str) -> str:
+    """Markdown уведомлений (как для Hermes) → HTML Telegram: **жирный**, `код`, > цитата, ## заголовок."""
+    out, quote = [], []
+
+    def inline(line: str) -> str:
+        line = html.escape(line)
+        line = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", line)
+        return re.sub(r"`([^`]+)`", r"<code>\1</code>", line)
+
+    def flush():
+        if quote:
+            out.append("<blockquote>" + "\n".join(quote) + "</blockquote>")
+            quote.clear()
+    for line in text.splitlines():
+        if line.startswith("> "):
+            quote.append(inline(line[2:]))
+            continue
+        flush()
+        out.append(f"<b>{inline(line.lstrip('#').strip())}</b>" if line.startswith("#") else inline(line))
+    flush()
+    return "\n".join(out)
+
+
+def send_long(tg: "TG", chat_id: int, text: str) -> None:
+    """HTML-сообщение частями по абзацам (лимит Telegram 4096)."""
+    part = ""
+    for block in md_to_html(text).split("\n\n"):
+        if part and len(part) + len(block) > 3800:
+            tg.call("sendMessage", chat_id=chat_id, text=part, parse_mode="HTML", disable_web_page_preview=True)
+            part = ""
+        part = f"{part}\n\n{block}" if part else block
+    if part.strip():
+        tg.call("sendMessage", chat_id=chat_id, text=part, parse_mode="HTML", disable_web_page_preview=True)
+
+
+def relay(tg: "TG", chat_id: int, st: dict) -> None:
+    """Уведомления hh (кроме черновиков: они карточками) — сюда, а не в Hermes."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import poll_notifications as pn
+    text = pn.poll(mark=True, quiet=True)
+    if text and text != "[SILENT]":
+        send_long(tg, chat_id, text)
+    # Итог дня
+    tz = os.environ.get("HH_DIGEST_TZ", "Asia/Ho_Chi_Minh")
+    now = datetime.now(ZoneInfo(tz))
+    if (now.hour, now.minute) >= (20, 30) and st.get("digest_date") != now.date().isoformat():
+        import hh_digest
+        st["digest_date"] = now.date().isoformat()
+        save_state(st)
+        d = hh_digest.digest(date.today().isoformat())
+        if d and d != "[SILENT]":
+            send_long(tg, chat_id, d)
+
+
 def run() -> int:
     load_env()
     token, chat = os.environ.get("HH_REPLY_BOT_TOKEN", ""), os.environ.get("HH_REPLY_CHAT_ID", "")
@@ -277,6 +336,7 @@ def run() -> int:
     while True:
         try:
             new_cards(tg, chat_id, st)
+            relay(tg, chat_id, st)
             ups = tg.call("getUpdates", offset=st["offset"], timeout=25,
                           allowed_updates=["message", "callback_query"]) or []
             for u in ups:
