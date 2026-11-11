@@ -823,6 +823,28 @@ async def api_account_applications(idx: int):
     return {"applications": apps, "total": len(apps)}
 
 
+@router.post("/api/negotiations/trash_discards")
+async def api_trash_discards(body: dict = None):
+    """Удалить отклики с отказом работодателя (кнопка hh «Удалить»). body {idx?, limit?}.
+    idx — номер аккаунта как в /ws (постоянные, затем браузерные сессии); по умолчанию первый."""
+    body = body or {}
+    idx = int(body.get("idx", 0))
+    state = bot._resolve_state(idx)
+    if state is None and bot.temp_sessions:
+        acc = bot.temp_sessions[0]
+    elif state is not None:
+        acc = state.acc
+    else:
+        return {"ok": False, "error": "Аккаунт не найден"}
+    from app.hh_negotiations import trash_discards
+    try:
+        res = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: trash_discards(acc, limit=int(body.get("limit", 50))))
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200]}
+    return {"ok": True, **res}
+
+
 @router.post("/api/account/{idx}/decline_discards")
 async def api_decline_discards(idx: int):
     """Авто-отклонение дискардов в переговорах"""

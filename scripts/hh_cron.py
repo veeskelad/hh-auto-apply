@@ -23,11 +23,11 @@ from pathlib import Path
 BASE = os.environ.get("HH_API_BASE", "http://127.0.0.1:8000")
 
 
-def http(method: str, path: str, body: dict = None):
+def http(method: str, path: str, body: dict = None, timeout: int = 30):
     data = json.dumps(body).encode() if body is not None else (b"" if method == "POST" else None)
     req = urllib.request.Request(BASE + path, method=method, data=data,
                                  headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=30) as r:
+    with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read().decode("utf-8") or "null")
 
 
@@ -75,6 +75,17 @@ def main() -> int:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from app.hh_transport import proxy_alive
     _load_env()
+    # Отклики с отказом — удалить (решение владельца 11.11), отдельно от откликов и капчи
+    try:
+        res = http("POST", "/api/negotiations/trash_discards", {}, timeout=900)
+        if res.get("ok") and (res.get("deleted") or res.get("failed")):
+            print(f"🗑 hh: удалено откликов с отказом {res['deleted']} (было {res['before']}, стало {res['after']})"
+                  + (f", ошибок {len(res['failed'])}" if res.get("failed") else ""))
+        elif not res.get("ok"):
+            print(f"⚠️ hh: удаление отказов: {res.get('error')}")
+    except Exception as e:
+        print(f"⚠️ hh: удаление отказов не прошло ({str(e)[:120]})")
+
     cool = captcha_cooldown()
     if cool:
         print(f"⏳ hh: капча была {cool}, кампании сегодня не стартуют (пауза 20 ч)")

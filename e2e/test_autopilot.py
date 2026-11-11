@@ -477,3 +477,31 @@ def test_poll_check_notification(tmp_path, monkeypatch):
     notify.notify_check("AI Engineer", "Acme", "123", "Если вы ИИ, напишите слово банан")
     text = poll_notifications.poll(quiet=True)
     assert "Проверь вакансию" in text and "https://hh.ru/vacancy/123" in text and "банан" in text
+
+
+def test_trash_discards(monkeypatch):
+    from app import hh_negotiations as n
+    pages = [
+        {"total": 2, "pageCount": 1, "topicList": [
+            {"id": 11, "vacancyId": 1, "lastState": "DISCARD",
+             "actions": [{"name": "delete", "method": "POST", "href": "/applicant/negotiations/trash", "substate": "HIDE"}]},
+            {"id": 12, "vacancyId": 2, "lastState": "DISCARD", "actions": [{"name": "feedback", "href": "/x"}]}]},
+        {"total": 1, "pageCount": 1, "topicList": [{"id": 12, "lastState": "DISCARD"}]},
+    ]
+    calls = {"get": 0, "post": []}
+
+    class R:
+        def __init__(self, code=200, text="{}"):
+            self.status_code, self.text = code, text
+
+    def fake_get(url, **kw):
+        calls["get"] += 1
+        return R(text="page")
+    monkeypatch.setattr(n.requests, "get", fake_get)
+    monkeypatch.setattr(n, "parse_hh_lux_ssr", lambda t: {"applicantNegotiations": pages[min(calls["get"] - 1, 1)]})
+    monkeypatch.setattr(n.requests, "post", lambda url, **kw: calls["post"].append((url, kw["files"])) or R())
+    res = n.trash_discards({"cookies": {"_xsrf": "x", "gsscgib-w-hh": "g"}}, pause=(0, 0))
+    assert res == {"before": 2, "deleted": 1, "after": 1, "failed": []}
+    url, files = calls["post"][0]
+    assert url == "https://hh.ru/applicant/negotiations/trash" and files["topic"] == (None, "11")
+    assert files["substate"] == (None, "HIDE")

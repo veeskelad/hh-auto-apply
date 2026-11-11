@@ -304,78 +304,71 @@ def fetch_hh_possible_offers(acc: dict) -> list:
     return []
 
 
-def auto_decline_discards(acc: dict) -> int:
-    """
-    Авто-отклонение дискардов в переговорах.
-    Возвращает количество отклонённых.
-    """
-    xsrf = acc.get("cookies", {}).get("_xsrf", "")
-    if not xsrf:
-        return 0
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Referer": "https://hh.ru/applicant/negotiations",
-        "X-Xsrftoken": xsrf,
-    }
-    declined = 0
-    try:
-        # Собираем (topic_id, action_url) дискардов (первые 5 страниц).
-        # Отказ работодателя нельзя "decline" — у такой переписки действие обычно
-        # "delete"/"archive"/"hide". Поэтому берём ЛЮБОЕ действие удаления/скрытия и
-        # используем его собственный url из HH, а не хардкод /decline.
-        REMOVE_HINTS = ("decline", "delete", "archive", "hide", "remove")
-        targets = []  # list[(topic_id, action_url|None)]
-        total_topics = 0
-        for page in range(5):
-            r = requests.get(
-                f"https://hh.ru/applicant/negotiations?state=DISCARD&page={page}",
-                headers=headers, cookies=acc["cookies"], verify=False, timeout=15
-            )
-            ssr = parse_hh_lux_ssr(r.text)
-            topics = ssr.get("applicantNegotiations", {}).get("topicList", [])
-            if not topics:
-                break
-            total_topics += len(topics)
-            for topic in topics:
-                tid = str(topic.get("id", ""))
-                actions = topic.get("actions", []) or []
-                chosen = None
-                for action in actions:
-                    aid = (action.get("id") or "").lower()
-                    aurl = (action.get("url") or "")
-                    if any(h in aid or h in aurl.lower() for h in REMOVE_HINTS):
-                        chosen = aurl or None
-                        break
-                if tid:
-                    targets.append((tid, chosen))
-            if len(topics) < 10:
-                break
+_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+       "(KHTML, like Gecko) Chrome/130.0 Safari/537.36")
 
-        post_headers = {**headers, "Content-Type": "application/x-www-form-urlencoded"}
-        # Кандидаты-эндпоинты, если HH не дал url действия напрямую
-        FALLBACK_URLS = (
-            "https://hh.ru/applicant/negotiations/delete",
-            "https://hh.ru/applicant/negotiations/decline",
-        )
-        for tid, aurl in targets[:50]:  # не более 50 за раз
-            urls = []
-            if aurl:
-                urls.append(aurl if aurl.startswith("http") else "https://hh.ru" + aurl)
-            urls.extend(FALLBACK_URLS)
-            for u in urls:
-                try:
-                    r2 = requests.post(
-                        u, headers=post_headers, cookies=acc["cookies"],
-                        data=f"topicId={tid}&_xsrf={xsrf}",
-                        verify=False, timeout=10, allow_redirects=False,
-                    )
-                    if r2.status_code in (200, 302):
-                        declined += 1
-                        break  # успех — к следующему топику
-                except Exception:
-                    continue
-        log_debug(f"auto_decline_discards: топиков={total_topics}, обработано={declined}")
+
+def _discard_topics(acc: dict) -> tuple:
+    """Отклики с отказом работодателя: (topics, total) со страницы «Отказ»."""
+    ck = acc.get("cookies", {})
+    topics, total = [], None
+    for page in range(10):
+        r = requests.get("https://hh.ru/applicant/negotiations", params={"state": "DISCARD", "page": page},
+                         headers={"User-Agent": _UA}, cookies=ck, timeout=40)
+        if r.status_code != 200 or _is_login_page(r.text):
+            raise RuntimeError(f"страница отказов: HTTP {r.status_code}")
+        an = parse_hh_lux_ssr(r.text).get("applicantNegotiations", {})
+        total = an.get("total") if total is None else total
+        page_topics = an.get("topicList") or []
+        topics += page_topics
+        if not page_topics or page + 1 >= int(an.get("pageCount") or 1):
+            break
+    return topics, total or 0
+
+
+def trash_discards(acc: dict, limit: int = 50, pause: tuple = (2.0, 4.0)) -> dict:
+    """Удалить отклики с отказом работодателя кнопкой hh «Удалить» (переезжают во вкладку «Удалённые»).
+
+    Запрос как у сайта (записан 11.11.2026): POST /applicant/negotiations/trash, multipart
+    topic, query=?state=DISCARD, substate=HIDE, заголовки X-Xsrftoken и X-GIB-* из кук Group-IB.
+    Результат сверяется по счётчику «Отказ» до и после. → {"before", "deleted", "after", "failed"}
+    """
+    import random
+    import time
+    ck = acc.get("cookies", {})
+    topics, before = _discard_topics(acc)
+    hdr = {"User-Agent": _UA, "X-Xsrftoken": ck.get("_xsrf", ""), "X-Requested-With": "XMLHttpRequest",
+           "Accept": "application/json", "X-hhtmSource": "negotiation_list",
+           "Referer": "https://hh.ru/applicant/negotiations?state=DISCARD",
+           "X-GIB-FGSSCgib-w-hh": ck.get("fgsscgib-w-hh", ""), "X-GIB-GSSCgib-w-hh": ck.get("gsscgib-w-hh", "")}
+    deleted, failed = 0, []
+    for t in topics[:limit]:
+        act = next((a for a in t.get("actions") or [] if a.get("name") == "delete" and a.get("href")), None)
+        if not act or t.get("lastState") != "DISCARD":
+            continue
+        tid = str(t.get("id"))
+        try:
+            r = requests.post("https://hh.ru" + act["href"], headers=hdr, cookies=ck, timeout=30,
+                              files={"topic": (None, tid), "query": (None, "?state=DISCARD"),
+                                     "substate": (None, act.get("substate") or "HIDE")})
+            if r.status_code == 200 and "isBot" not in r.text:
+                deleted += 1
+            else:
+                failed.append(f"{t.get('vacancyId')}: HTTP {r.status_code}")
+                if "isBot" in r.text:
+                    break  # капча: дальше бесполезно
+        except Exception as e:
+            failed.append(f"{t.get('vacancyId')}: {str(e)[:80]}")
+        time.sleep(random.uniform(*pause))
+    _, after = _discard_topics(acc)
+    log_debug(f"trash_discards: отказов было {before}, удалено {deleted}, стало {after}, ошибок {len(failed)}")
+    return {"before": before, "deleted": deleted, "after": after, "failed": failed}
+
+
+def auto_decline_discards(acc: dict) -> int:
+    """Совместимость со старой кнопкой дашборда: удалить отказы, вернуть сколько удалено."""
+    try:
+        return trash_discards(acc)["deleted"]
     except Exception as e:
         log_debug(f"auto_decline_discards error: {e}")
-    return declined
+        return 0
