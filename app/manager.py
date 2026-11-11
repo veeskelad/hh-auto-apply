@@ -42,12 +42,13 @@ from app.hh_api import (
 from app.llm import generate_llm_reply, generate_llm_reply_plan, chat_playbook
 from app.hh_transport import proxy_alive
 from app.notify import (notify_interview, notify_response, notify_error, notify_chat, notify_auth_expired,
-                        notify_captcha)
+                        notify_captcha, notify_check)
+from app import vacancy_screen
 
 from app.hh_apply import (
     _resolve_letter,
     send_response_async, fill_and_submit_questionnaire,
-    _check_vacancy_before_apply, check_limit, touch_resume,
+    _check_vacancy_before_apply, check_limit, touch_resume, fetch_vacancy_description,
 )
 
 from app.hh_chat import (
@@ -1473,6 +1474,34 @@ class BotManager:
                     self._add_log(state.short, state.color,
                         f"\U0001f6d1 Дневной лимит {state.active_daily_limit} откликов. Пауза до завтра 00:00.", "error")
                     break
+
+                # Текст вакансии (решения владельца 11.11): офис — пропуск; указания для ИИ — не
+                # выполняем, вакансию отдаём владельцу на проверку. Описание из кэша, его же берёт письмо.
+                screened = []
+                for vid in batch:
+                    prev = vacancy_screen.known(vid)
+                    meta = state.vacancy_meta.get(vid, {})
+                    if not prev:
+                        vd = fetch_vacancy_description(vid, acc.get("cookies", {}))
+                        found = vacancy_screen.screen(vd.get("description", ""))
+                        title, company = meta.get("title") or vd.get("title", ""), meta.get("company") or vd.get("company", "")
+                        if found["agent"]:
+                            vacancy_screen.remember(vid, "agent", found["agent"], title, company)
+                            notify_check(title, company, vid, found["agent"], state.short)
+                            prev = {"reason": "agent"}
+                        elif found["office"]:
+                            vacancy_screen.remember(vid, "office", found["office"], title, company)
+                            prev = {"reason": "office"}
+                    if prev:
+                        why = {"agent": "указание для ИИ, на проверку", "office": "офис в тексте"}.get(prev["reason"], prev["reason"])
+                        state.campaign_skip_reasons[prev["reason"]] = state.campaign_skip_reasons.get(prev["reason"], 0) + 1
+                        self._add_log(state.short, state.color, f"⏭ {(meta.get('title') or vid)[:40]}: {why}", "warning")
+                        continue
+                    screened.append(vid)
+                batch = screened
+                if not batch:
+                    i += batch_size
+                    continue
 
                 # Pre-check: skip inconsistent vacancies if enabled
                 if eff_skip_inconsistent:

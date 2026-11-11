@@ -107,6 +107,10 @@ def poll(mark: bool = True, quiet: bool = False) -> str:
         lines.append(f"⚠️ Ошибки откликов: {len(errors)}")
         lines += [f"- {n.get('message', '')}" for n in errors[:3]]
         lines.append("")
+    for n in by.pop("check", []):
+        lines += [f"🔍 **Проверь вакансию** — {n.get('title', '')} ({n.get('company', '')}). В тексте указание "
+                  "для ИИ, бот его не выполнил и не откликнулся.", f"> {n.get('message', '')}",
+                  n.get("url", ""), ""]
     responses = by.pop("response", [])
     if responses and not quiet:
         names = ", ".join(f"{n.get('title', '')} ({n.get('company', '')})" for n in responses[:5])

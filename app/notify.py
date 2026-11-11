@@ -97,6 +97,12 @@ def notify_chat(employer: str, vacancy_title: str, employer_msg: str, plan: dict
                                "draft_id": draft_id, "neg_id": neg_id})
 
 
+def notify_check(title: str, company: str, vid: str, snippet: str, account: str = ""):
+    """В тексте вакансии указание для ИИ/ботов: бот не откликнулся, владелец смотрит сам."""
+    _write_notification("check", title, company, snippet[:300], account,
+                        extra={"url": f"https://hh.ru/vacancy/{vid}", "vacancy_id": str(vid)})
+
+
 def notify_captcha(account: str = "", url: str = ""):
     """hh требует капчу на отклики через API: владелец решает её по ссылке в браузере, где вошёл в hh."""
     _write_notification("error", "", "", "🧩 hh просит капчу, отклики стоят", account,
