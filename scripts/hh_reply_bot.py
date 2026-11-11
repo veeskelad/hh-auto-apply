@@ -200,6 +200,9 @@ def send_choice(card: dict) -> str:
 
 def on_callback(tg: TG, chat_id: int, st: dict, cb: dict) -> None:
     action, _, rest = (cb.get("data") or "").partition(":")
+    if action == "captcha":
+        on_captcha(tg, chat_id, st, cb, rest)
+        return
     cid, _, arg = rest.partition(":")
     card = st["cards"].get(cid)
     note = ""
@@ -299,16 +302,132 @@ def send_long(tg: "TG", chat_id: int, text: str) -> None:
         tg.call("sendMessage", chat_id=chat_id, text=part, parse_mode="HTML", disable_web_page_preview=True)
 
 
+def _now() -> datetime:
+    return datetime.now(ZoneInfo(os.environ.get("HH_DIGEST_TZ", "Asia/Ho_Chi_Minh")))
+
+
+def _captchas_after(ts: str) -> list:
+    """Уведомления о капче новее ts (ISO), по времени."""
+    out = []
+    for f in sorted(NOTIFY_DIR.glob("*_error.json")) if NOTIFY_DIR.exists() else []:
+        try:
+            n = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if n.get("subtype") == "captcha" and n.get("timestamp", "") > ts:
+            out.append(n)
+    return out
+
+
+def _responses_between(a: str, b: str) -> int:
+    n = 0
+    for f in NOTIFY_DIR.glob("*_response.json") if NOTIFY_DIR.exists() else []:
+        try:
+            ts = json.loads(f.read_text(encoding="utf-8")).get("timestamp", "")
+        except Exception:
+            continue
+        n += a < ts <= b
+    return n
+
+
+def captcha_prompt(tg: "TG", chat_id: int, st: dict) -> None:
+    """Капча hh → владельцу ссылка и кнопка «Решил», но не чаще раза в день (решение владельца
+    11.11: «с телефона могу решать, главное чтобы не постоянно»). Капча после перезапуска —
+    стоп до утра без вопроса: по 10–11.11 после ~12 откликов hh ставит её на каждый отклик."""
+    first = "captcha_last_ts" not in st  # первый запуск: о старых капчах не спрашивать
+    fresh = _captchas_after(st.get("captcha_last_ts", ""))
+    if not fresh:
+        st.setdefault("captcha_last_ts", "")
+        return
+    n = fresh[-1]
+    st["captcha_last_ts"] = n.get("timestamp", "")
+    today = _now().date().isoformat()
+    if first:
+        pass
+    elif st.get("captcha_resumed_date") == today:
+        if st.get("captcha_fail_date") != today:
+            st["captcha_fail_date"] = today
+            passed = _responses_between(st.get("captcha_resumed_ts", ""), n.get("timestamp", ""))
+            tg.call("sendMessage", chat_id=chat_id, parse_mode="HTML", text=(
+                f"🧩 <b>hh снова просит капчу.</b> После твоей прошло откликов: {passed}. "
+                "Сегодня больше не спрошу, кампании продолжат утром."))
+    elif st.get("captcha_ask_date") != today and _resume_allowed():
+        st["captcha_ask_date"] = today
+        url = n.get("captcha_url") or "https://hh.ru/applicant/negotiations"
+        msg = tg.call("sendMessage", chat_id=chat_id, parse_mode="HTML", text=(
+            "🧩 <b>hh просит капчу, отклики стоят.</b>\n"
+            "1. Открой ссылку (это вакансия, на которой бот остановился)\n"
+            "2. Откликнись и реши капчу\n"
+            "3. Нажми «Решил» — бот продолжит кампании\n\n"
+            "Не хочешь — «До завтра», бот продолжит утром сам. Спрашиваю не чаще раза в день."),
+            reply_markup={"inline_keyboard": [
+                [{"text": "🧩 Открыть капчу", "url": url}],
+                [{"text": "✅ Решил", "callback_data": f"captcha:solved:{today}"},
+                 {"text": "До завтра", "callback_data": f"captcha:skip:{today}"}]]})
+        st["captcha_msg_id"] = (msg or {}).get("message_id")
+    save_state(st)
+
+
+def _resume_allowed() -> bool:
+    """Перезапуск после капчи — только до HH_CAPTCHA_RESUME_UNTIL (время сервера, по умолч. 12:00).
+    Новая капча включает в hh_cron паузу 20 ч: позже полудня она сорвала бы утренний старт
+    кампаний (Hermes «hh: кампании» в 09:00 МСК). Часы здесь серверные (МСК), а дата
+    captcha_ask_date — по HH_DIGEST_TZ (+07); расходятся только 20:00–24:00 МСК, вне окна вопроса."""
+    hh, _, mm = os.environ.get("HH_CAPTCHA_RESUME_UNTIL", "12:00").partition(":")
+    now = datetime.now()
+    return (now.hour, now.minute) < (int(hh), int(mm or 0))
+
+
+def _resume_campaigns() -> str:
+    """hh_cron в фоне, без паузы 20 ч. '' — запущен, иначе почему нет."""
+    import subprocess
+    if subprocess.run(["pgrep", "-f", "scripts/hh_cron.py"], capture_output=True).returncode == 0:
+        return "кампании уже идут"
+    names = os.environ.get("HH_CRON_CAMPAIGNS", "Ai-engineer devops").split()
+    with open(DATA / "hh_cron.log", "a", encoding="utf-8") as log:
+        subprocess.Popen([sys.executable, str(ROOT / "scripts" / "hh_cron.py"), "--notify", "--after-captcha", *names],
+                         cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                         start_new_session=True)
+    return ""
+
+
+def on_captcha(tg: "TG", chat_id: int, st: dict, cb: dict, rest: str) -> None:
+    what, _, day = rest.partition(":")
+    msg = cb.get("message") or {}
+    today = _now().date().isoformat()
+    note, footer = "", ""
+    if day != today or st.get("captcha_resumed_date") == today:
+        note = "Уже неактуально"
+    elif what == "solved" and not _resume_allowed():
+        st["captcha_resumed_date"] = st["captcha_fail_date"] = today
+        footer = "⏸ Уже после полудня: перезапуск сдвинул бы завтрашний старт. Продолжу утром сам."
+    elif what == "solved":
+        why = _resume_campaigns()
+        if why:
+            note = why
+        else:
+            st["captcha_resumed_date"], st["captcha_resumed_ts"] = today, datetime.now().isoformat()
+            footer = "▶️ <b>Продолжаю кампании.</b> Если капча вернётся — стоп до утра, больше не спрошу."
+    elif what == "skip":
+        st["captcha_resumed_date"] = st["captcha_fail_date"] = today  # сегодня больше не спрашивать
+        footer = "⏸ Ок, продолжу утром сам."
+    if footer and msg.get("message_id"):
+        tg.call("editMessageText", chat_id=chat_id, message_id=msg["message_id"], parse_mode="HTML",
+                text=html.escape(msg.get("text", "")) + "\n\n" + footer)
+    save_state(st)
+    tg.call("answerCallbackQuery", callback_query_id=cb["id"], text=note)
+
+
 def relay(tg: "TG", chat_id: int, st: dict) -> None:
     """Уведомления hh (кроме черновиков: они карточками) — сюда, а не в Hermes."""
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import poll_notifications as pn
-    text = pn.poll(mark=True, quiet=True)
+    text = pn.poll(mark=True, quiet=True, captcha=False)
     if text and text != "[SILENT]":
         send_long(tg, chat_id, text)
+    captcha_prompt(tg, chat_id, st)
     # Итог дня
-    tz = os.environ.get("HH_DIGEST_TZ", "Asia/Ho_Chi_Minh")
-    now = datetime.now(ZoneInfo(tz))
+    now = _now()
     if (now.hour, now.minute) >= (20, 30) and st.get("digest_date") != now.date().isoformat():
         import hh_digest
         st["digest_date"] = now.date().isoformat()

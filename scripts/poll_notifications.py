@@ -58,9 +58,10 @@ def _chat_block(n: dict) -> list:
     return lines
 
 
-def poll(mark: bool = True, quiet: bool = False) -> str:
+def poll(mark: bool = True, quiet: bool = False, captcha: bool = True) -> str:
     """Свежие уведомления одним сообщением. quiet=True (для @ninjiu_bot): отклики и ошибки
-    по отдельным вакансиям не показываются — они в итоге дня (hh_digest.py)."""
+    по отдельным вакансиям не показываются — они в итоге дня (hh_digest.py).
+    captcha=False: про капчу молчать — @ninjiu_bot шлёт её отдельно, с кнопками."""
     if not NOTIFY_DIR.exists():
         return "[SILENT]"
     fresh = []
@@ -96,9 +97,9 @@ def poll(mark: bool = True, quiet: bool = False) -> str:
         cmd = os.environ.get("HH_LOGIN_CMD", "python3 scripts/ego_login.py --target <сервер>")
         lines += ["🔑 **Вход в hh.ru протух.** Войди в hh.ru в ego lite на компьютере и выполни:",
                   f"`{cmd}`", ""]
-    captcha = [n for n in by.get("error", []) if n.get("subtype") == "captcha"]
-    if captcha:
-        url = captcha[-1].get("captcha_url", "")
+    captcha_n = [n for n in by.get("error", []) if n.get("subtype") == "captcha"]
+    if captcha_n and captcha:
+        url = captcha_n[-1].get("captcha_url", "")
         lines += ["🧩 **hh включил капчу на отклики, бот остановился до завтра.** Так hh делает примерно "
                   "после 12 откликов за сутки, к утру снимает сам. Ничего делать не нужно: кампании "
                   "продолжат в следующий запуск по расписанию.", ""]

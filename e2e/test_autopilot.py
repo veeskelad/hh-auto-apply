@@ -600,3 +600,78 @@ def test_trash_discards(monkeypatch):
     url, files = calls["post"][0]
     assert url == "https://hh.ru/applicant/negotiations/trash" and files["topic"] == (None, "11")
     assert files["substate"] == (None, "HIDE")
+
+
+class _FakeTG:
+    def __init__(self):
+        self.calls = []
+
+    def call(self, method, **p):
+        self.calls.append((method, p))
+        return {"message_id": len(self.calls)}
+
+
+def _captcha_bot(tmp_path, monkeypatch, hour=10):
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    import hh_reply_bot as b
+    nd = tmp_path / "notifications"
+    nd.mkdir(exist_ok=True)
+    monkeypatch.setattr(b, "NOTIFY_DIR", nd)
+    monkeypatch.setattr(b, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(notify, "NOTIFY_DIR", nd)
+
+    class _DT(datetime_cls):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime_cls(2026, 11, 12, hour, 0, tzinfo=tz)
+    monkeypatch.setattr(b, "datetime", _DT)
+    return b
+
+
+from datetime import datetime as datetime_cls  # noqa: E402
+
+
+def test_captcha_once_a_day_and_resume(tmp_path, monkeypatch):
+    b = _captcha_bot(tmp_path, monkeypatch)
+    started = []
+    monkeypatch.setattr(b, "_resume_campaigns", lambda: started.append(1) or "")
+    st, tg = b.load_state(), _FakeTG()
+    notify.notify_captcha("acc", "https://hh.ru/applicant/vacancy_response?vacancyId=5")
+    b.captcha_prompt(tg, 1, st)            # первый запуск: о старой капче молчим
+    assert tg.calls == []
+    time_ = __import__("time"); time_.sleep(0.01)
+    notify.notify_captcha("acc", "https://hh.ru/applicant/vacancy_response?vacancyId=6")
+    b.captcha_prompt(tg, 1, st)
+    (m, p), = tg.calls
+    kb = p["reply_markup"]["inline_keyboard"]
+    assert kb[0][0]["url"].endswith("vacancyId=6") and kb[1][0]["callback_data"] == "captcha:solved:2026-11-12"
+    b.on_callback(tg, 1, st, {"id": "c", "data": "captcha:solved:2026-11-12", "message": {"message_id": 1, "text": "x"}})
+    assert started == [1] and any(c[0] == "editMessageText" for c in tg.calls)
+    b.on_callback(tg, 1, st, {"id": "c", "data": "captcha:solved:2026-11-12", "message": {"message_id": 1, "text": "x"}})
+    assert started == [1]                  # второй раз не перезапускаем
+    n = len(tg.calls); time_.sleep(0.01)
+    notify.notify_captcha("acc", "u")       # капча вернулась: одно сообщение, без кнопок
+    b.captcha_prompt(tg, 1, st)
+    assert len(tg.calls) == n + 1 and "снова просит капчу" in tg.calls[-1][1]["text"]
+    assert "reply_markup" not in tg.calls[-1][1]
+    time_.sleep(0.01); notify.notify_captcha("acc", "u")
+    b.captcha_prompt(tg, 1, st)
+    assert len(tg.calls) == n + 1           # больше не пишем
+
+
+def test_captcha_after_noon_not_asked(tmp_path, monkeypatch):
+    b = _captcha_bot(tmp_path, monkeypatch, hour=15)
+    st, tg = b.load_state(), _FakeTG()
+    st["captcha_last_ts"] = ""
+    notify.notify_captcha("acc", "u")
+    b.captcha_prompt(tg, 1, st)
+    assert tg.calls == []
+
+
+def test_poll_without_captcha_block(tmp_path, monkeypatch):
+    poll_notifications, _ = _scripts()
+    monkeypatch.setattr(notify, "NOTIFY_DIR", tmp_path)
+    monkeypatch.setattr(poll_notifications, "NOTIFY_DIR", tmp_path)
+    notify.notify_captcha("acc", "u")
+    assert "капчу" not in poll_notifications.poll(mark=False, quiet=True, captcha=False)
+    assert "капчу" in poll_notifications.poll(mark=False, quiet=True)

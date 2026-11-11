@@ -45,6 +45,19 @@ def accounts() -> list:
         return []
 
 
+def trash_discards() -> None:
+    """Отклики с отказом — удалить (решение владельца 11.11), отдельно от откликов и капчи."""
+    try:
+        res = http("POST", "/api/negotiations/trash_discards", {}, timeout=900)
+        if res.get("ok") and (res.get("deleted") or res.get("failed")):
+            print(f"🗑 hh: удалено откликов с отказом {res['deleted']} (было {res['before']}, стало {res['after']})"
+                  + (f", ошибок {len(res['failed'])}" if res.get("failed") else ""))
+        elif not res.get("ok"):
+            print(f"⚠️ hh: удаление отказов: {res.get('error')}")
+    except Exception as e:
+        print(f"⚠️ hh: удаление отказов не прошло ({str(e)[:120]})")
+
+
 def run_campaign(cid: str, name: str, deadline: float) -> str:
     """'' — кампания дошла до лимита; иначе причина остановки."""
     res = http("POST", f"/api/campaigns/{cid}/start")
@@ -71,22 +84,16 @@ def main() -> int:
     ap.add_argument("names", nargs="+")
     ap.add_argument("--max-hours", type=float, default=3.0, help="на каждую кампанию")
     ap.add_argument("--notify", action="store_true", help="проблему записать уведомлением в data/notifications")
+    ap.add_argument("--after-captcha", action="store_true",
+                    help="владелец решил капчу (кнопка в @ninjiu_bot): без паузы 20 ч и без уборки отказов")
     a = ap.parse_args()
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from app.hh_transport import proxy_alive
     _load_env()
-    # Отклики с отказом — удалить (решение владельца 11.11), отдельно от откликов и капчи
-    try:
-        res = http("POST", "/api/negotiations/trash_discards", {}, timeout=900)
-        if res.get("ok") and (res.get("deleted") or res.get("failed")):
-            print(f"🗑 hh: удалено откликов с отказом {res['deleted']} (было {res['before']}, стало {res['after']})"
-                  + (f", ошибок {len(res['failed'])}" if res.get("failed") else ""))
-        elif not res.get("ok"):
-            print(f"⚠️ hh: удаление отказов: {res.get('error')}")
-    except Exception as e:
-        print(f"⚠️ hh: удаление отказов не прошло ({str(e)[:120]})")
+    if not a.after_captcha:
+        trash_discards()
 
-    cool = captcha_cooldown()
+    cool = "" if a.after_captcha else captcha_cooldown()
     if cool:
         print(f"⏳ hh: капча была {cool}, кампании сегодня не стартуют (пауза 20 ч)")
         return 0
