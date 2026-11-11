@@ -59,7 +59,7 @@ def test_plan_auto_category(files, monkeypatch):
         "category": "experience", "confidence": 0.9, "reply": "Да — работал с Vault",
         "variants": ["Вариант 2", "Вариант 3"], "reason": "вопрос про опыт"}, ensure_ascii=False))
     plan = llm.generate_llm_reply_plan([{"sender": "employer", "text": "Был опыт с Vault?"}], "Acme")
-    assert plan["auto"] is True and plan["category"] == "experience"
+    assert plan["auto"] is False and plan["category"] == "experience"  # опыт — только черновиком
     assert "—" not in plan["reply"]
     assert plan["variants"] == ["Вариант 2", "Вариант 3"]
     system = seen["messages"][0]["content"]
@@ -414,3 +414,9 @@ def test_cron_captcha_cooldown(tmp_path, monkeypatch):
     ts = (datetime.now() - timedelta(hours=25)).isoformat()
     (nd / "a_error.json").write_text(json.dumps({"type": "error", "subtype": "captcha", "timestamp": ts}))
     assert hh_cron.captcha_cooldown() == ""
+
+
+
+def test_plan_thanks_is_auto(files, monkeypatch):
+    fake_llm(monkeypatch, json.dumps({"category": "thanks", "confidence": 0.9, "reply": "Спасибо!"}))
+    assert llm.generate_llm_reply_plan([{"sender": "employer", "text": "Спасибо за отклик!"}])["auto"] is True

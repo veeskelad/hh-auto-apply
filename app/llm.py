@@ -249,7 +249,7 @@ def generate_llm_reply(conversation: list, employer_name: str = "", cover_letter
 
 
 # Категории плейбука: в каких бот отвечает сам, а в каких только готовит черновик владельцу
-CHAT_AUTO_CATEGORIES = {"thanks", "experience", "salary_format", "contacts", "test_task", "interview_invite"}
+CHAT_AUTO_CATEGORIES = {"thanks", "salary_format", "contacts", "test_task", "interview_invite"}  # experience — черновиком: 11.11 бот сам ответил «Да, Kafka»
 CHAT_CATEGORIES = CHAT_AUTO_CATEGORIES | {"offer", "negotiation", "rejection", "unknown", "no_reply"}
 CHAT_AUTO_MIN_CONFIDENCE = 0.7
 
