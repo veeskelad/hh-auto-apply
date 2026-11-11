@@ -262,17 +262,20 @@ def on_message(tg: TG, chat_id: int, st: dict, msg: dict) -> None:
 
 
 def md_to_html(text: str) -> str:
-    """Markdown уведомлений (как для Hermes) → HTML Telegram: **жирный**, `код`, > цитата, ## заголовок."""
+    """Markdown уведомлений (как для Hermes) → HTML Telegram: **жирный**, `код`, [текст](url),
+    > цитата (длиннее двух строк — сворачивается), ## заголовок."""
     out, quote = [], []
 
     def inline(line: str) -> str:
-        line = html.escape(line)
+        line = html.escape(line, quote=False)
+        line = re.sub(r"\[([^\]]+)\]\((https?://[^)\s]+)\)", r'<a href="\2">\1</a>', line)
         line = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", line)
         return re.sub(r"`([^`]+)`", r"<code>\1</code>", line)
 
     def flush():
         if quote:
-            out.append("<blockquote>" + "\n".join(quote) + "</blockquote>")
+            tag = "<blockquote expandable>" if len(quote) > 2 else "<blockquote>"
+            out.append(tag + "\n".join(quote) + "</blockquote>")
             quote.clear()
     for line in text.splitlines():
         if line.startswith("> "):

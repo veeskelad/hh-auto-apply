@@ -250,7 +250,30 @@ def test_digest(tmp_path, monkeypatch):
     hh_apply.log_questionnaire("1", "SRE", "Beta", [{"field": "f", "text": "Опыт с Vault?"}],
                                {"f": "Да, HA на Raft"}, "sent", by_llm=True)
     text = hh_digest.digest(date.today().isoformat())
-    assert "Откликов: 1" in text and "Анкет: 1, приняты 1, нейросетью 1" in text and "HA на Raft" in text
+    assert "📤 1 отклик" in text and "Анкеты: отправлено 1 из 1" in text and "HA на Raft" in text
+    assert "**[SRE](https://hh.ru/vacancy/1)** — Beta" in text and "1. DevOps — Acme" in text and "> **О:** Да, HA на Raft" in text
+
+
+def test_digest_fills_missing_title(tmp_path, monkeypatch):
+    """Отклик с анкетой пришёл без названия: берём его из applied_vacancies, а не пишем «— »."""
+    _, hh_digest = _scripts()
+    (tmp_path / "notifications").mkdir()
+    monkeypatch.setattr(notify, "NOTIFY_DIR", tmp_path / "notifications")
+    monkeypatch.setattr(hh_digest, "DATA", tmp_path)
+    monkeypatch.setattr(hh_digest, "_pending", lambda: [])
+    monkeypatch.setattr(hh_apply, "QUESTIONNAIRE_LOG", tmp_path / "questionnaire_log.jsonl")
+    (tmp_path / "applied_vacancies.json").write_text(json.dumps(
+        {"acc": {"7": {"title": "Старший DevOps", "company": "Северсталь"}}}), encoding="utf-8")
+    notify.notify_response("", "")
+    hh_apply.log_questionnaire("7", "", "", [{"field": "f", "text": "Опыт?"}], {"f": "Да"}, "sent")
+    hh_apply.log_questionnaire("8", "", "", [{"field": "f", "text": "Где живёте?"}], {"f": "Вне РФ"}, "test")
+    from datetime import date
+    text = hh_digest.digest(date.today().isoformat())
+    assert " —  " not in text and "-  — " not in text
+    assert "1. [Старший DevOps](https://hh.ru/vacancy/7) — Северсталь 📝" in text
+    assert "[вакансия 8](https://hh.ru/vacancy/8)" in text and "hh не принял ответы" in text
+    assert text.index("вакансия 8") < text.index("**О:** Да")  # не ушедшая анкета — первой
+    assert "questionnaire_log.jsonl" not in text
 
 
 FORM_OPEN = """<form>
@@ -497,6 +520,9 @@ def test_reply_bot_md_to_html():
     h = b.md_to_html("## 📊 hh за день\n**Жирно** и `hh skip x`\n> цитата <a>\n> вторая\n- пункт & ещё")
     assert "<b>📊 hh за день</b>" in h and "<b>Жирно</b>" in h and "<code>hh skip x</code>" in h
     assert "<blockquote>цитата &lt;a&gt;\nвторая</blockquote>" in h and "пункт &amp; ещё" in h
+    h = b.md_to_html("[DevOps (Lead)](https://hh.ru/vacancy/1?a=1&b=2) — X\n> 1\n> 2\n> 3")
+    assert '<a href="https://hh.ru/vacancy/1?a=1&amp;b=2">DevOps (Lead)</a> — X' in h
+    assert "<blockquote expandable>1\n2\n3</blockquote>" in h
 
 
 def test_poll_quiet_hides_responses_and_errors(tmp_path, monkeypatch):

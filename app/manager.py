@@ -717,7 +717,7 @@ class BotManager:
         })
         # Telegram notifications for key events
         if result == "sent":
-            notify_response(title, company, state.short)
+            notify_response(title, company, state.short, vid)
         elif result == "error":
             notify_error(title, company, "ошибка отправки", state.short)
 
@@ -1639,8 +1639,11 @@ class BotManager:
                                             salary if salary else "")
 
                     elif result == "test":
-                        title = info.get("title", "")
-                        company = info.get("company", "")
+                        # Ответ hh с анкетой часто без названия: берём из выдачи поиска, иначе
+                        # анкета и уведомление уходят с пустыми «название — компания»
+                        meta_t = state.vacancy_meta.get(vid, {})
+                        title = info.get("title", "") or meta_t.get("title", "")
+                        company = info.get("company", "") or meta_t.get("company", "")
                         display_title = title[:40] if title else vid
 
                         if not eff_apply_tests:

@@ -56,10 +56,11 @@ def notify_interview(title: str, company: str, account: str = ""):
                         f"🎯 Приглашение на собеседование! {title} — {company}", account)
 
 
-def notify_response(title: str, company: str, account: str = ""):
+def notify_response(title: str, company: str, account: str = "", vacancy_id: str = ""):
     """Отклик отправлен"""
+    extra = {"vacancy_id": vacancy_id, "url": f"https://hh.ru/vacancy/{vacancy_id}"} if vacancy_id else None
     _write_notification("response", title, company,
-                        f"📤 Откликнулся: {title} — {company}", account)
+                        f"📤 Откликнулся: {title} — {company}", account, extra)
 
 
 def notify_discard(title: str, company: str, reason: str, account: str = ""):
