@@ -460,7 +460,7 @@ CAMPAIGN_PARAM_KEYS = (
     "industry", "stop_words", "strict_title_match", "remote_only", "salary_only",
     "accredited_it", "skip_inconsistent", "daily_limit", "daily_limit_max",
     "total_limit", "resume_hash", "resume_hash_2", "ai_cover_letter", "ai_answers",
-    "batch_responses", "response_delay", "gender", "phone", "tg", "limit_24_7",
+    "batch_responses", "response_delay", "gender", "phone", "tg", "limit_24_7", "manual_apply",
 )
 
 

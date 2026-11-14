@@ -22,6 +22,7 @@ from app.config import (
     DEFAULT_LLM_SKIP_PATTERNS, LLM_QUESTION_MARKERS,
 )
 
+from app import apply_queue
 from app.storage import (
     _load_cache, _cache_applied, _cache_lock,
     add_applied, is_applied, add_test_vacancy, is_test, get_stats,
@@ -47,7 +48,7 @@ from app import vacancy_screen
 
 from app.hh_apply import (
     _resolve_letter,
-    send_response_async, fill_and_submit_questionnaire,
+    send_response_async, fill_and_submit_questionnaire, prepare_manual_apply,
     _check_vacancy_before_apply, check_limit, touch_resume, fetch_vacancy_description,
 )
 
@@ -116,7 +117,7 @@ _CAMPAIGN_FIELDS = [
     "industry", "schedule", "employment", "stop_words", "limit_24_7",
     "salary_only", "accredited_it", "strict_title_match", "ai_cover_letter",
     "ai_answers", "gender", "phone", "tg",
-    "batch_responses", "response_delay", "skip_inconsistent", "llm_cover_letter_prompt",
+    "batch_responses", "response_delay", "skip_inconsistent", "llm_cover_letter_prompt", "manual_apply",
 ]
 
 
@@ -672,6 +673,65 @@ class BotManager:
             "company": company[:25],
             "extra": extra[:70],
         })
+
+    def _queue_manual(self, state: AccountState, acc: dict, batch: list, salary_map: dict) -> bool:
+        """Режим очереди: письмо и анкета в app.apply_queue, отклик на hh отправляет владелец.
+        Счётчики daily_sent/campaign_sent растут как у отклика — по ним работают лимиты кампании.
+        True — дальше не готовить: капча, протухший вход или очередь полна."""
+        for vid in batch:
+            if self._stop_event.is_set() or state.paused or (state.active_campaign_id and not state.armed):
+                return False
+            waiting = len([it for it in apply_queue.items("open") if it["account"] == acc["name"]])
+            if waiting >= CONFIG.manual_queue_max:
+                state.paused = True  # как дневной лимит: hh_cron видит «limit» и останавливает кампанию
+                state.status = "limit"
+                state.status_detail = f"Очередь полна: {waiting} откликов ждут тебя в @ninjiu_bot"
+                self._add_log(state.short, state.color, f"⏸ {state.status_detail}", "warning")
+                return True
+            meta = state.vacancy_meta.get(vid, {})
+            title, company = meta.get("title", ""), meta.get("company", "")
+            sal = salary_map.get(vid)
+            salary = f"от {sal:,}".replace(",", " ") if isinstance(sal, (int, float)) and sal else ""
+            state.current_vacancy_id, state.current_vacancy_title, state.current_vacancy_company = vid, title, company
+            try:
+                result, item = asyncio.run(prepare_manual_apply(
+                    acc, vid, title, company, salary, state.active_campaign_id,
+                    {"source_url": meta.get("source_url"), "source_query": meta.get("source_query")}))
+            except Exception as e:
+                state.errors += 1
+                self._add_log(state.short, state.color, f"❌ {vid}: очередь: {str(e)[:60]}", "error")
+                continue
+            if result == "captcha":
+                state.paused = True
+                state.captcha_hold = True
+                state.status = "captcha"
+                state.status_detail = "🧩 hh просит капчу"
+                self._add_log(state.short, state.color, "🧩 hh просит капчу даже на странице анкеты", "error")
+                if not getattr(state, "captcha_notified", False):
+                    notify_captcha(state.short, (item or {}).get("captcha_url", ""))
+                    state.captcha_notified = True
+                return True
+            if result == "auth_error":
+                self._mark_cookies_expired(state)
+                state.paused = True
+                self._add_log(state.short, state.color, "⚠️ Куки протухли! Обновите куки и снимите паузу.", "error")
+                return True
+            today = datetime.now().strftime("%Y-%m-%d")
+            if state.daily_date != today:
+                state.daily_sent, state.daily_date, state.hard_stopped = 0, today, False
+            state.daily_sent += 1
+            state.campaign_sent += 1
+            state.queued = getattr(state, "queued", 0) + 1
+            state.action_history.append(f"📝 {(title or vid)[:30]}")
+            self._add_log(state.short, state.color,
+                          f"📝 В очередь: {(title or vid)[:40]} @ {company[:20]}"
+                          + (f" (анкета {len(item['qa'])})" if item["qa"] else ""), "success")
+            self._add_acc_event(state, "📝", "queued", title or vid, company, "ждёт тебя в @ninjiu_bot")
+            # Без POST, но GET описания и анкеты на каждую вакансию: залпом их не шлём
+            end = time.time() + random.uniform(5, 15)
+            while time.time() < end and not self._stop_event.is_set() and not state.paused:
+                time.sleep(0.5)
+        return False
 
     def _check_auto_pause(self, state: AccountState):
         """Авто-пауза при превышении лимита ошибок подряд."""
@@ -1278,6 +1338,8 @@ class BotManager:
             eff_batch = _as_int(acc.get("batch_responses")) or CONFIG.batch_responses
             eff_delay = _as_int(acc["response_delay"]) if acc.get("response_delay") not in (None, "") else CONFIG.response_delay
             eff_skip_inconsistent = bool(acc["skip_inconsistent"]) if "skip_inconsistent" in acc else CONFIG.skip_inconsistent
+            # Очередь «бот готовит — владелец жмёт» (app/apply_queue.py): в hh ничего не отправляем
+            eff_manual = bool(acc["manual_apply"]) if acc.get("manual_apply") is not None else CONFIG.manual_apply
 
             def _apply_pause():
                 """Рандомизированная пауза между откликами (анти-burst): от response_delay до ~1,6×.
@@ -1336,6 +1398,9 @@ class BotManager:
                     already_count += 1
                     state.already_applied += 1
                     _skip("already")
+                elif eff_manual and apply_queue.is_queued(acc["name"], vid):
+                    already_count += 1
+                    _skip("queued")
                 elif (is_test(vid) or state._test_failures.get(vid, 0) >= 2) and not apply_tests:
                     test_count += 1
                     state.tests += 1
@@ -1544,6 +1609,12 @@ class BotManager:
                         f"\U0001f4e4 Пакет {len(batch)} откликов: {', '.join(batch[:3])}{'...' if len(batch) > 3 else ''}",
                         "info",
                     )
+
+                if eff_manual:
+                    if self._queue_manual(state, acc, batch, salary_map):
+                        break
+                    i += batch_size
+                    continue
 
                 # Choose apply method: OAuth API or Web (per-account or global)
                 if state.use_oauth or CONFIG.use_oauth_apply:

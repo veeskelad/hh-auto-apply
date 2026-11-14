@@ -65,6 +65,10 @@ class Config:
     auto_pause_errors = 5  # Авто-пауза после N ошибок подряд (0 = выключено)
     auto_apply_tests: bool = False  # Автоматически проходить опросники при откликах
     use_oauth_apply: bool = False  # Использовать OAuth API для откликов (вместо web cookies)
+    # Очередь «бот готовит — владелец жмёт» (app/apply_queue.py): POST-откликов в hh нет.
+    # Поле кампании manual_apply, если задано, важнее.
+    manual_apply: bool = False
+    manual_queue_max: int = 60  # открытых записей очереди больше — кампания не готовит новые
     daily_apply_limit: int = 0  # Жёсткий лимит откликов в день (0 = без ограничения)
     stop_on_hh_limit: bool = True  # Полная остановка при HH лимите (не перепроверять)
     # Фильтр по формату работы (пустой = без фильтра, все форматы)
@@ -217,7 +221,7 @@ _CONFIG_KEYS = [
     "pages_per_url", "max_concurrent", "response_delay", "pause_between_cycles",
     "limit_check_interval", "resume_touch_interval", "batch_responses", "min_salary",
     "auto_pause_errors", "questionnaire_default_answer", "llm_fill_questionnaire",
-    "skip_inconsistent", "use_oauth_apply", "daily_apply_limit", "stop_on_hh_limit", "llm_check_interval",
+    "skip_inconsistent", "use_oauth_apply", "manual_apply", "manual_queue_max", "daily_apply_limit", "stop_on_hh_limit", "llm_check_interval",
     "filter_agencies", "filter_low_competition", "search_period_days",
 ]
 

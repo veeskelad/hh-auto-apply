@@ -238,6 +238,66 @@ def log_questionnaire(vid: str, title: str, company: str, rich_qs: list, answers
     except Exception as e:
         log_debug(f"log_questionnaire error: {e}")
 
+def _llm_questionnaire(acc: dict, vid: str, html: str, questions: list, field_answers: dict,
+                       vacancy_title: str = "", company: str = "") -> tuple:
+    """Ответы нейросети поверх шаблонных (если включено llm_fill_questionnaire).
+    Возвращает (field_answers, llm_used, unanswered): unanswered — вопросы с вариантами, на
+    которые по фактам ответа нет (такую анкету не отправляем, шаблон выдумал бы «Да»)."""
+    llm_used = False
+    if CONFIG.llm_fill_questionnaire and CONFIG.llm_enabled and _openai_available and questions:
+        rich_qs = _parse_questionnaire_rich(html)
+        resume_text = ""
+        if CONFIG.llm_use_resume:
+            resume_text = fetch_all_resume_texts(acc)
+        llm_ans = generate_llm_questionnaire_answers(rich_qs, vacancy_title, company, resume_text=resume_text)
+        if llm_ans:
+            # Validate LLM answers against actual options
+            rich_fields = {q["field"]: q for q in rich_qs}
+            validated_ans = {}
+            for field, llm_val in llm_ans.items():
+                if field in rich_fields:
+                    q = rich_fields[field]
+                    if q["type"] in ("radio", "checkbox", "select") and q["options"]:
+                        valid_values = [o["value"] for o in q["options"]]
+                        if llm_val in valid_values:
+                            validated_ans[field] = llm_val
+                        else:
+                            # Try fuzzy match (case-insensitive strip)
+                            matched = [v for v in valid_values if v.lower().strip() == llm_val.lower().strip()]
+                            if matched:
+                                validated_ans[field] = matched[0]
+                            else:
+                                log_debug(f"LLM answer '{llm_val}' not in options {valid_values}, skipping field {field}")
+                    else:
+                        validated_ans[field] = llm_val
+                else:
+                    validated_ans[field] = llm_val
+            # «Свой вариант» без текста hh не примет: оставляем шаблонный выбор
+            for q in rich_qs:
+                tf = q.get("text_field")
+                if tf and validated_ans.get(q["field"]) == OPEN_VALUE \
+                        and not str(validated_ans.get(tf, "")).strip():
+                    validated_ans.pop(q["field"], None)
+                    validated_ans.pop(tf, None)
+            # Вопрос с вариантами без ответа нейросети: шаблон подставил бы первый вариант
+            # («Да») — это выдумка. Такую анкету не отправляем.
+            unanswered = [q["text"][:80] for q in rich_qs
+                          if q["type"] in ("radio", "select") and q.get("options")
+                          and not str(validated_ans.get(q["field"], "")).strip()]
+            if unanswered:
+                log_debug(f"Questionnaire {vid}: нет ответа по фактам на {unanswered}")
+                return validated_ans, True, unanswered
+            overridden = [f for f in validated_ans if f in field_answers]
+            for f in overridden:
+                field_answers[f] = validated_ans[f]
+            llm_used = bool(overridden)
+            log_debug(f"Questionnaire {vid}: LLM заполнил {len(overridden)}/{len(field_answers)} полей: {overridden}")
+        else:
+            log_debug(f"Questionnaire {vid}: LLM вернул пустой ответ, используем шаблоны")
+
+    return field_answers, llm_used, []
+
+
 async def fill_and_submit_questionnaire(acc: dict, vid: str,
                                         vacancy_title: str = "", company: str = "") -> tuple:
     """
@@ -273,60 +333,13 @@ async def fill_and_submit_questionnaire(acc: dict, vid: str,
                 log_debug(f"Questionnaire: no task fields found for {vid}")
                 return "test", {}
 
-            # LLM-заполнение опросника (если включено)
-            llm_used = False
-            if CONFIG.llm_fill_questionnaire and CONFIG.llm_enabled and _openai_available and questions:
-                rich_qs = _parse_questionnaire_rich(html)
-                resume_text = ""
-                if CONFIG.llm_use_resume:
-                    resume_text = fetch_all_resume_texts(acc)
-                llm_ans = generate_llm_questionnaire_answers(rich_qs, vacancy_title, company, resume_text=resume_text)
-                if llm_ans:
-                    # Validate LLM answers against actual options
-                    rich_fields = {q["field"]: q for q in rich_qs}
-                    validated_ans = {}
-                    for field, llm_val in llm_ans.items():
-                        if field in rich_fields:
-                            q = rich_fields[field]
-                            if q["type"] in ("radio", "checkbox", "select") and q["options"]:
-                                valid_values = [o["value"] for o in q["options"]]
-                                if llm_val in valid_values:
-                                    validated_ans[field] = llm_val
-                                else:
-                                    # Try fuzzy match (case-insensitive strip)
-                                    matched = [v for v in valid_values if v.lower().strip() == llm_val.lower().strip()]
-                                    if matched:
-                                        validated_ans[field] = matched[0]
-                                    else:
-                                        log_debug(f"LLM answer '{llm_val}' not in options {valid_values}, skipping field {field}")
-                            else:
-                                validated_ans[field] = llm_val
-                        else:
-                            validated_ans[field] = llm_val
-                    # «Свой вариант» без текста hh не примет: оставляем шаблонный выбор
-                    for q in rich_qs:
-                        tf = q.get("text_field")
-                        if tf and validated_ans.get(q["field"]) == OPEN_VALUE \
-                                and not str(validated_ans.get(tf, "")).strip():
-                            validated_ans.pop(q["field"], None)
-                            validated_ans.pop(tf, None)
-                    # Вопрос с вариантами без ответа нейросети: шаблон подставил бы первый вариант
-                    # («Да») — это выдумка. Такую анкету не отправляем.
-                    unanswered = [q["text"][:80] for q in rich_qs
-                                  if q["type"] in ("radio", "select") and q.get("options")
-                                  and not str(validated_ans.get(q["field"], "")).strip()]
-                    if unanswered:
-                        log_debug(f"Questionnaire {vid}: нет ответа по фактам на {unanswered}, анкету не отправляю")
-                        log_questionnaire(vid, vacancy_title, company, rich_qs, validated_ans, "skipped_no_facts",
-                                          by_llm=True)
-                        return "test", {"skipped": "no_facts", "questions": unanswered}
-                    overridden = [f for f in validated_ans if f in field_answers]
-                    for f in overridden:
-                        field_answers[f] = validated_ans[f]
-                    llm_used = bool(overridden)
-                    log_debug(f"Questionnaire {vid}: LLM заполнил {len(overridden)}/{len(field_answers)} полей: {overridden}")
-                else:
-                    log_debug(f"Questionnaire {vid}: LLM вернул пустой ответ, используем шаблоны")
+            field_answers, llm_used, unanswered = _llm_questionnaire(
+                acc, vid, html, questions, field_answers, vacancy_title, company)
+            if unanswered:
+                log_debug(f"Questionnaire {vid}: анкету не отправляю")
+                log_questionnaire(vid, vacancy_title, company, _parse_questionnaire_rich(html), field_answers,
+                                  "skipped_no_facts", by_llm=True)
+                return "test", {"skipped": "no_facts", "questions": unanswered}
 
             log_debug(f"Questionnaire {vid}: {len(field_answers)} fields, {len(questions)} questions")
             for name, val in field_answers.items():
@@ -379,6 +392,52 @@ async def fill_and_submit_questionnaire(acc: dict, vid: str,
     except Exception as e:
         log_debug(f"fill_and_submit_questionnaire error: {e}")
         return "error", {"exception": str(e)}
+
+
+async def prepare_manual_apply(acc: dict, vid: str, title: str = "", company: str = "",
+                               salary: str = "", campaign_id: str = None, meta: dict = None) -> tuple:
+    """Режим очереди: подготовить отклик и положить его в app.apply_queue, в hh ничего не отправлять.
+
+    Письмо — как у обычного отклика. Анкета — GET страницы отклика (POST нет), ответы нейросети
+    по фактам; на вопрос без ответа по фактам владелец отвечает сам, шаблонные ответы в карточку
+    не попадают. Возвращает ("queued", запись), а при капче или протухшем входе — ("captcha", {...})
+    или ("auth_error", {}) и в очередь ничего не кладёт.
+    """
+    from app import apply_queue
+    letter = await _resolve_letter(acc, vid)
+    qa, note = [], ""
+    try:
+        url_form = f"https://hh.ru/applicant/vacancy_response?vacancyId={vid}&withoutTest=no"
+        r = await asyncio.to_thread(
+            requests.get, url_form, timeout=20, cookies=acc.get("cookies", {}),
+            headers={"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                     "Referer": f"https://hh.ru/vacancy/{vid}"})
+        html = r.text
+        if "hhcaptcha" in html or "isBot" in html:
+            return "captcha", {"captcha_url": f"https://hh.ru/applicant/vacancy_response?vacancyId={vid}"}
+        if _is_login_page(html):
+            return "auth_error", {}
+        questions, field_answers = _parse_questionnaire_fields(html)
+        if field_answers:
+            answers, llm_used, unanswered = await asyncio.to_thread(
+                _llm_questionnaire, acc, vid, html, questions, field_answers, title, company)
+            # Без нейросети в answers шаблон («Да», первый вариант) — это выдумка, не показываем
+            miss = set(unanswered)
+            for q in _parse_questionnaire_rich(html):
+                a = answer_text(q, answers) if llm_used and q["text"][:80] not in miss else ""
+                qa.append({"q": q.get("text", ""), "a": a or "— ответь сам"})
+            if not llm_used:
+                note = "анкету нейросеть не заполнила: ответь сам"
+            elif unanswered:
+                note = f"нет ответа по фактам: {len(unanswered)} вопр."
+    except Exception as e:
+        log_debug(f"prepare_manual_apply {vid}: {e}")
+        note = "анкету не прочитал: смотри на hh"
+    item = apply_queue.add(acc["name"], vid, {
+        "title": title, "company": company, "salary": salary, "letter": letter,
+        "qa": qa, "note": note, "campaign_id": campaign_id, "meta": meta or {}})
+    log_debug(f"📝 В очередь: {vid} {title[:40]} (анкета: {len(qa)} вопр.)")
+    return "queued", item
 
 
 def _check_vacancy_before_apply(acc: dict, vid: str) -> dict:

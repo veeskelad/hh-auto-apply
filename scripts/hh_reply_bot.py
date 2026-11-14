@@ -33,6 +33,7 @@ NOTIFY_DIR = DATA / "notifications"
 STATE_FILE = DATA / "reply_bot_state.json"
 API_BASE = os.environ.get("HH_API_BASE", "http://127.0.0.1:8000")
 HEARTBEAT_TTL = 300  # сек: дольше бот молчит — черновики снова уходят через Hermes
+QUEUE_OPEN = int(os.environ.get("HH_QUEUE_OPEN", "5"))  # открытых карточек очереди откликов сразу
 
 
 def load_env() -> None:
@@ -67,6 +68,7 @@ def load_state() -> dict:
     st.setdefault("cards", {})    # id карточки → {draft_id, file, message_id, options, status}
     st.setdefault("seen", [])     # файлы уведомлений, по которым карточка уже есть
     st.setdefault("custom", {})   # message_id приглашения «напиши ответ» → id карточки
+    st.setdefault("queue", {})    # id записи очереди откликов → {message_id, extra: [message_id…]}
     return st
 
 
@@ -198,10 +200,102 @@ def send_choice(card: dict) -> str:
     return "" if r.get("sent") else f"hh не принял ответ: {str(r)[:200]}"
 
 
+# ── очередь откликов: бот готовит, владелец жмёт на hh (app/apply_queue.py) ─────
+
+def queue_text(it: dict) -> tuple:
+    """(карточка, [сообщения с анкетой, если в карточку не влезла])."""
+    e = html.escape
+    head = [f"📝 <b>{e(it.get('company') or '—')}</b> · {e(it.get('title') or it['vacancy_id'])}"]
+    if it.get("salary"):
+        head.append(f"💰 {e(it['salary'])}")
+    head.append(f'<a href="{e(it["url"])}">Вакансия</a>')
+    if it.get("note"):
+        head.append(f"⚠️ {e(it['note'])}")
+    letter = (it.get("letter") or "").strip()
+    head += ["", "<b>Письмо</b> (нажми, чтобы скопировать)", f"<pre>{e(letter[:3300])}</pre>"]
+    qa = [f"<b>{i}. {e(x.get('q', '')[:400])}</b>\n<code>{e(x.get('a', '')[:900])}</code>"
+          for i, x in enumerate(it.get("qa") or [], 1)]
+    card = "\n".join(head)
+    if not qa:
+        return card, []
+    block = "<b>Анкета</b>\n" + "\n\n".join(qa)
+    if len(card) + len(block) < 3900:
+        return card + "\n\n" + block, []
+    parts, part = [], "<b>Анкета</b>"
+    for q in qa:
+        if len(part) + len(q) > 3800:
+            parts.append(part)
+            part = ""
+        part = f"{part}\n\n{q}" if part else q
+    parts.append(part)
+    return card + "\n\n<i>Анкета — следующим сообщением</i>", parts
+
+
+def queue_keyboard(it: dict) -> dict:
+    return {"inline_keyboard": [
+        [{"text": "🔗 Откликнуться на hh", "url": it["response_url"]}],
+        [{"text": "✅ Отправил", "callback_data": f"q:done:{it['id']}"},
+         {"text": "⏭ Пропустить", "callback_data": f"q:skip:{it['id']}"}]]}
+
+
+def queue_cards(tg: TG, chat_id: int, st: dict) -> None:
+    """Новые записи очереди → карточки, не больше QUEUE_OPEN открытых сразу (закрыл одну — пришла следующая)."""
+    res = api("GET", "/api/apply_queue?status=open")
+    if not res.get("ok"):
+        return
+    items = res.get("items") or []
+    shown = sum(1 for it in items if it["id"] in st["queue"])
+    for it in items:
+        if shown >= QUEUE_OPEN:
+            break
+        if it["id"] in st["queue"]:
+            continue
+        text, extra = queue_text(it)
+        msg = tg.call("sendMessage", chat_id=chat_id, text=text, parse_mode="HTML",
+                      reply_markup=queue_keyboard(it), disable_web_page_preview=True)
+        ids = []
+        for part in extra:
+            m = tg.call("sendMessage", chat_id=chat_id, text=part, parse_mode="HTML",
+                        reply_to_message_id=msg["message_id"], disable_web_page_preview=True)
+            ids.append(m["message_id"])
+        st["queue"][it["id"]] = {"message_id": msg["message_id"], "extra": ids}
+        shown += 1
+        save_state(st)
+
+
+def on_queue(tg: TG, chat_id: int, st: dict, cb: dict, rest: str) -> None:
+    what, _, iid = rest.partition(":")
+    card = st["queue"].get(iid) or {}
+    r = api("POST", f"/api/apply_queue/{'done' if what == 'done' else 'skip'}", {"id": iid})
+    note = ""
+    it = r.get("item") or {}
+    if not r.get("ok"):
+        note = f"Не вышло: {r.get('error', '')}"[:190]
+    else:
+        e = html.escape
+        mark = "✅ Отправил" if it.get("status") == "done" else "⏭ Пропущено"
+        msg_id = card.get("message_id") or (cb.get("message") or {}).get("message_id")
+        tg.call("editMessageText", chat_id=chat_id, message_id=msg_id, parse_mode="HTML",
+                disable_web_page_preview=True,
+                text=f"{mark}: <b>{e(it.get('company') or '—')}</b> · {e(it.get('title') or it.get('vacancy_id', ''))}")
+        for mid in card.get("extra") or []:
+            try:
+                tg.call("deleteMessage", chat_id=chat_id, message_id=mid)
+            except Exception:
+                pass
+        if iid in st["queue"]:
+            st["queue"][iid]["closed"] = True
+    save_state(st)
+    tg.call("answerCallbackQuery", callback_query_id=cb["id"], text=note)
+
+
 def on_callback(tg: TG, chat_id: int, st: dict, cb: dict) -> None:
     action, _, rest = (cb.get("data") or "").partition(":")
     if action == "captcha":
         on_captcha(tg, chat_id, st, cb, rest)
+        return
+    if action == "q":
+        on_queue(tg, chat_id, st, cb, rest)
         return
     cid, _, arg = rest.partition(":")
     card = st["cards"].get(cid)
@@ -249,8 +343,13 @@ def on_message(tg: TG, chat_id: int, st: dict, msg: dict) -> None:
         (k for k, c in st["cards"].items() if str(c["message_id"]) == rid), None)
     if text in ("/start", "/help"):
         tg.call("sendMessage", chat_id=chat_id, text=(
-            "Сюда приходят чаты hh, где нужен твой ответ. Нажми вариант или «Свой ответ», "
-            "потом «Отправить». Остальное (отклики, сводка) приходит в aisy."))
+            "Сюда приходят чаты hh, где нужен твой ответ: нажми вариант или «Свой ответ», потом «Отправить».\n"
+            f"И очередь откликов (по {QUEUE_OPEN} за раз): «Откликнуться на hh», вставь письмо и ответы, "
+            "отправь на hh, потом «Отправил». /queue — сколько ждёт."))
+        return
+    if text == "/queue":
+        n = api("GET", "/api/apply_queue?status=open").get("count", "?")
+        tg.call("sendMessage", chat_id=chat_id, text=f"📝 В очереди откликов: {n}")
         return
     if not cid or not text or st["cards"].get(cid, {}).get("status") in ("sent", "skipped"):
         if text:
@@ -458,6 +557,7 @@ def run() -> int:
     while True:
         try:
             new_cards(tg, chat_id, st)
+            queue_cards(tg, chat_id, st)
             relay(tg, chat_id, st)
             ups = tg.call("getUpdates", offset=st["offset"], timeout=25,
                           allowed_updates=["message", "callback_query"]) or []

@@ -71,6 +71,7 @@ from app.routes.debug import router as debug_router      # noqa: E402
 from app.routes.hh_login import router as hh_login_router  # noqa: E402
 from app.routes.auth import router as auth_router          # noqa: E402
 from app.routes.campaigns import router as campaigns_router  # noqa: E402
+from app.routes.apply_queue import router as apply_queue_router  # noqa: E402
 
 app.include_router(auth_router)
 app.include_router(core_router)
@@ -83,3 +84,4 @@ app.include_router(llm_router)
 app.include_router(debug_router)
 app.include_router(hh_login_router)
 app.include_router(campaigns_router)
+app.include_router(apply_queue_router)
